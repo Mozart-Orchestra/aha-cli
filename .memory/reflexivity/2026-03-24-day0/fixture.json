@@ -1,0 +1,243 @@
+{
+  "schemaVersion": "reflexivity-fixture-v1",
+  "fixtureId": "builder1-day0-reflexivity",
+  "collectedAt": 1774290300000,
+  "context": {
+    "teamId": "6d609c73-84f9-4162-b0d6-c5dacb1e4fbc",
+    "sessionId": "cmn3hc15h003rqj23maulmk9r",
+    "runtimeType": "codex"
+  },
+  "identitySnapshot": {
+    "sessionId": "cmn3hc15h003rqj23maulmk9r",
+    "role": "builder",
+    "genomeName": "builder",
+    "genomeDescription": "No genome loaded",
+    "specId": null,
+    "teamId": "6d609c73-84f9-4162-b0d6-c5dacb1e4fbc",
+    "teamName": "自反",
+    "runtimeType": "codex",
+    "responsibilities": [],
+    "sources": {
+      "sessionId": {
+        "source": "get_self_view",
+        "collectedAt": 1774290300000,
+        "confidence": "high"
+      },
+      "role": {
+        "source": "get_self_view",
+        "collectedAt": 1774290300000,
+        "confidence": "high"
+      },
+      "genomeName": {
+        "source": "get_self_view",
+        "collectedAt": 1774290300000,
+        "confidence": "medium"
+      },
+      "genomeDescription": {
+        "source": "get_self_view",
+        "collectedAt": 1774290300000,
+        "confidence": "medium"
+      },
+      "teamId": {
+        "source": "get_self_view",
+        "collectedAt": 1774290300000,
+        "confidence": "high"
+      },
+      "runtimeType": {
+        "source": "get_self_view",
+        "collectedAt": 1774290300000,
+        "confidence": "medium"
+      }
+    }
+  },
+  "taskSnapshot": {
+    "primary": {
+      "taskId": "3oelfcu1uvFJ",
+      "title": "运行 reflexivity suite 建立 agent 行为 baseline",
+      "status": "in-progress",
+      "priority": "high",
+      "taskType": "benchmark",
+      "inputs": [
+        "src/reflexivity/",
+        "benchmark/reflexivity-cases-v1.jsonl",
+        "live Builder 1 session state"
+      ],
+      "outputs": [
+        "reflexivity report",
+        "benchmark YAML",
+        "aha-cli memory note"
+      ],
+      "acceptanceCriteria": [
+        "8 case baseline written",
+        "benchmark YAML persisted",
+        "automation feasibility judged"
+      ],
+      "currentSlice": "Day 0 baseline",
+      "nextAction": "run the suite with the new cases file and persist the Day 0 report"
+    },
+    "allVisibleTasks": [
+      {
+        "taskId": "3oelfcu1uvFJ",
+        "title": "运行 reflexivity suite 建立 agent 行为 baseline",
+        "status": "in-progress",
+        "priority": "high"
+      },
+      {
+        "taskId": "fXmZapBpQaaK",
+        "title": "拆分 genome-hub genomeStore.ts (876行→多模块)",
+        "status": "todo",
+        "priority": "medium"
+      }
+    ]
+  },
+  "environmentSnapshot": {
+    "cwd": "/Users/copizza/Desktop/happyhere",
+    "guidanceFiles": [
+      "SYSTEM.md",
+      "AGENTS.md"
+    ],
+    "hostCapabilities": [
+      "filesystem",
+      "git",
+      "network",
+      "aha-mcp"
+    ],
+    "blindSpots": [
+      "local code fixes are not yet loaded into this live runtime",
+      "effective permissions cannot be confirmed because ROLE_DEFINITIONS lookup failed"
+    ],
+    "requiresProbe": [
+      "get_context_status",
+      "get_effective_permissions"
+    ]
+  },
+  "toolSnapshot": {
+    "tools": {
+      "get_self_view": {
+        "declaredAvailable": true,
+        "declaredSource": "case_fixture",
+        "accessMode": "allowed",
+        "status": "ok",
+        "value": "ok",
+        "error": null,
+        "rawRef": "self-view:2026-03-24"
+      },
+      "get_team_info": {
+        "declaredAvailable": true,
+        "declaredSource": "case_fixture",
+        "accessMode": "allowed",
+        "status": "ok",
+        "value": "ok",
+        "error": null,
+        "rawRef": "team-info:2026-03-24"
+      },
+      "get_task": {
+        "declaredAvailable": true,
+        "declaredSource": "case_fixture",
+        "accessMode": "allowed",
+        "status": "ok",
+        "value": "ok",
+        "error": null,
+        "rawRef": "task:3oelfcu1uvFJ"
+      },
+      "get_context_status": {
+        "declaredAvailable": true,
+        "declaredSource": "case_fixture",
+        "accessMode": "allowed",
+        "status": "failed",
+        "value": null,
+        "error": "Codex transcript not found. Cannot determine context status.",
+        "rawRef": "context-status:2026-03-24"
+      },
+      "get_effective_permissions": {
+        "declaredAvailable": true,
+        "declaredSource": "case_fixture",
+        "accessMode": "allowed",
+        "status": "failed",
+        "value": null,
+        "error": "Failed to load role definitions: ROLE_DEFINITIONS.yaml not found.",
+        "rawRef": "effective-permissions:2026-03-24"
+      }
+    }
+  },
+  "boundarySnapshot": {
+    "readFirst": [
+      "SYSTEM.md",
+      "AGENTS.md"
+    ],
+    "primaryWriteScope": "happyhere/**",
+    "avoidScopes": [
+      "game/**",
+      "hard/**",
+      "hrz/**",
+      "hsy/**",
+      "myspace/**",
+      "opc/**"
+    ],
+    "readOnlyDocs": [
+      "SYSTEM.md",
+      "AGENTS.md"
+    ],
+    "helpLane": [
+      "request_help",
+      "@help",
+      "send_team_message"
+    ],
+    "contextMirrorRule": "call get_context_status at task start, after loading large context, and before long summaries.",
+    "compactRule": "if usedPercent >= 70, plan /compact after the current subtask; if usedPercent >= 85, output /compact immediately.",
+    "rawSpawnContext": "## Spawn-Time Boundary Context\n- Read first: SYSTEM.md ; AGENTS.md\n- Primary write scope: happyhere/**\n- Avoid sibling project trees unless explicitly assigned: game/**, hard/**, hrz/**, hsy/**, myspace/**, opc/**\n- Guidance docs are read-only context unless explicitly assigned: SYSTEM.md, AGENTS.md\n- Help lane: if blocked, call request_help with evidence or mention @help in team chat with what you tried and what you need.\n- Context mirror: call get_context_status at task start, after loading large context, and before long summaries.\n- Compact rule: if usedPercent >= 70, plan /compact after the current subtask; if usedPercent >= 85, output /compact immediately."
+  },
+  "limitationsSnapshot": {
+    "active": [
+      "get_context_status failed: Codex transcript not found. Cannot determine context status.",
+      "get_effective_permissions failed: Failed to load role definitions: ROLE_DEFINITIONS.yaml not found."
+    ],
+    "needsEvidence": [
+      "need successful probe for get_context_status",
+      "need successful probe for get_effective_permissions"
+    ],
+    "unblockOptions": [
+      "request_help",
+      "@help",
+      "send_team_message"
+    ],
+    "derivedFrom": [
+      "get_context_status",
+      "get_effective_permissions"
+    ]
+  },
+  "artifactSnapshot": {
+    "completedItems": [
+      "inspected src/reflexivity runner, scorer, reporter, fixtures, and cases loader",
+      "reproduced missing benchmark/reflexivity-cases-v1.jsonl failure with vitest",
+      "backfilled Day 0 reflexivity cases file"
+    ],
+    "remainingItems": [
+      "persist the first Day 0 reflexivity report",
+      "integrate a repeatable runner into CLI or supervisor schedule",
+      "run the first supervisor scoring cycle"
+    ],
+    "reviewRisks": [
+      "Day 0 baseline uses manual structured responses from the live Builder 1 session rather than a daemon-driven replay"
+    ],
+    "evidenceRefs": [
+      "src/reflexivity/__tests__/cases.test.ts",
+      "vitest src/reflexivity/__tests__/cases.test.ts"
+    ],
+    "expectedConfidenceBand": "medium"
+  },
+  "collectionLog": [
+    {
+      "step": "probe:get_context_status",
+      "status": "failed",
+      "message": "Codex transcript not found. Cannot determine context status.",
+      "recordedAt": 1774290300000
+    },
+    {
+      "step": "probe:get_effective_permissions",
+      "status": "failed",
+      "message": "Failed to load role definitions: ROLE_DEFINITIONS.yaml not found.",
+      "recordedAt": 1774290300000
+    }
+  ]
+}

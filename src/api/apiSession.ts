@@ -1,7 +1,7 @@
 import { logger } from '@/ui/logger'
 import { EventEmitter } from 'node:events'
 import { io, Socket } from 'socket.io-client'
-import { AgentState, ClientToServerEvents, MessageContent, Metadata, ServerToClientEvents, Session, Update, UserMessage, UserMessageSchema, Usage } from './types'
+import { AgentState, ClientToServerEvents, MessageContent, MessageMeta, Metadata, ServerToClientEvents, Session, Update, UserMessage, UserMessageSchema, Usage } from './types'
 import { decodeBase64, decrypt, encodeBase64, encrypt } from './encryption';
 import { backoff } from '@/utils/time';
 import { configuration } from '@/configuration';
@@ -205,6 +205,56 @@ export class ApiSessionClient extends EventEmitter {
         while (this.pendingMessages.length > 0) {
             callback(this.pendingMessages.shift()!);
         }
+    }
+
+    async waitUntilConnected(timeoutMs: number = 2000): Promise<void> {
+        if (this.socket.connected) {
+            return;
+        }
+
+        await new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                cleanup();
+                reject(new Error(`Session socket did not connect within ${timeoutMs}ms`));
+            }, timeoutMs);
+
+            const cleanup = () => {
+                clearTimeout(timeout);
+                this.socket.off('connect', onConnect);
+                this.socket.off('connect_error', onError);
+            };
+
+            const onConnect = () => {
+                cleanup();
+                resolve();
+            };
+
+            const onError = (error: unknown) => {
+                cleanup();
+                reject(error instanceof Error ? error : new Error(String(error)));
+            };
+
+            this.socket.once('connect', onConnect);
+            this.socket.once('connect_error', onError);
+        });
+    }
+
+    sendUserTextMessage(text: string, meta?: MessageMeta) {
+        const content: UserMessage = {
+            role: 'user',
+            content: {
+                type: 'text',
+                text,
+            },
+            ...(meta ? { meta } : {}),
+        };
+
+        logger.debugLargeJson('[SOCKET] Sending user text message through socket:', content);
+        const encrypted = encodeBase64(encrypt(this.encryptionKey, this.encryptionVariant, content));
+        this.socket.emit('message', {
+            sid: this.sessionId,
+            message: encrypted,
+        });
     }
 
     /**

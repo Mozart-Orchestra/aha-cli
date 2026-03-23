@@ -9,19 +9,14 @@ import { TrackedSession } from './types';
 import { SpawnSessionOptions, SpawnSessionResult } from '@/modules/common/registerCommonHandlers';
 
 /**
- * Compact an agent's context by sending /compact command through daemon RPC.
- * For Claude: injects /compact into the session's message queue
- * For Codex: sends /compact through the session's stdin/RPC
+ * Compact an agent's context by sending /compact through the daemon control server.
+ * The daemon then injects it into the live session as a user message.
  */
 export async function compactAgent(
     pid: number,
     session: TrackedSession,
     daemonHttpPort: number
 ): Promise<{ success: boolean; error?: string }> {
-    // POST to http://127.0.0.1:{daemonHttpPort}/session-command
-    // body: { sessionId: session.ahaSessionId, command: '/compact' }
-    // This is a NEW endpoint we'll need on controlServer.
-    // For now, just implement the client side.
     try {
         const response = await fetch(`http://127.0.0.1:${daemonHttpPort}/session-command`, {
             method: 'POST',
@@ -71,9 +66,7 @@ export async function resumeClaudeAgent(
         } catch { /* dead */ }
         await new Promise(resolve => setTimeout(resolve, 1000));
 
-        // 5. Spawn new session with --resume
-        // Note: SpawnSessionOptions doesn't have claudeArgs yet;
-        // passing resume context via env for now until the option is added.
+        // 5. Spawn new session with recovered Aha session id.
         const result = await spawnSession({
             directory: metadata?.path || process.cwd(),
             agent: 'claude',
@@ -83,7 +76,7 @@ export async function resumeClaudeAgent(
             sessionName: metadata?.name,
             env: {
                 ...(metadata?.memberId ? { AHA_TEAM_MEMBER_ID: metadata.memberId } : {}),
-                AHA_RESUME_SESSION_ID: sessionId,
+                AHA_RECOVER_SESSION_ID: sessionId,
             },
         });
 

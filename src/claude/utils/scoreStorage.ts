@@ -2,7 +2,13 @@
  * Agent Score Storage Module
  *
  * Provides local JSON file storage for agent performance scores.
- * Scores are stored at `.aha/scores/agent_scores.json` relative to cwd.
+ * Canonical storage lives under `configuration.ahaHomeDir/scores/agent_scores.json`
+ * (for this repo/package, that usually resolves to `~/.aha-v3/scores/agent_scores.json`).
+ *
+ * Historical compatibility:
+ * - reads canonical storage first
+ * - also reads legacy home storage (`~/.aha/scores/agent_scores.json`)
+ * - also reads legacy working-directory storage (`<cwd>/.aha/scores/agent_scores.json`)
  *
  * v2 scoring model — two-layer hard metrics:
  *   Layer 1 — HardMetrics: raw event counts (tasksAssigned, toolCallCount, tokensUsed, …)
@@ -17,6 +23,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
+import { homedir } from 'os';
 import { configuration } from '@/configuration';
 
 /**
@@ -152,18 +159,52 @@ interface ScoreFile {
     scores: AgentScore[];
 }
 
-function getCanonicalScorePath(): string {
-    return join(configuration.ahaHomeDir, 'scores', 'agent_scores.json');
+export interface ScoreStoragePaths {
+    canonicalPath: string;
+    legacyHomePath: string;
+    legacyWorkingDirectoryPath: string;
+    readablePaths: string[];
 }
 
-function getLegacyWorkingDirectoryScorePath(): string {
-    return join(process.cwd(), '.aha', 'scores', 'agent_scores.json');
+export interface ScoreStorageInfo extends ScoreStoragePaths {
+    existingPaths: string[];
 }
 
-function getReadableScorePaths(): string[] {
-    const canonical = getCanonicalScorePath();
-    const legacy = getLegacyWorkingDirectoryScorePath();
-    return canonical === legacy ? [canonical] : [canonical, legacy];
+function dedupePaths(paths: string[]): string[] {
+    return Array.from(new Set(paths));
+}
+
+export function resolveScoreStoragePaths(opts?: {
+    ahaHomeDir?: string;
+    cwd?: string;
+    homeDir?: string;
+}): ScoreStoragePaths {
+    const canonicalPath = join(opts?.ahaHomeDir ?? configuration.ahaHomeDir, 'scores', 'agent_scores.json');
+    const legacyHomePath = join(opts?.homeDir ?? homedir(), '.aha', 'scores', 'agent_scores.json');
+    const legacyWorkingDirectoryPath = join(opts?.cwd ?? process.cwd(), '.aha', 'scores', 'agent_scores.json');
+
+    return {
+        canonicalPath,
+        legacyHomePath,
+        legacyWorkingDirectoryPath,
+        readablePaths: dedupePaths([
+            canonicalPath,
+            legacyHomePath,
+            legacyWorkingDirectoryPath,
+        ]),
+    };
+}
+
+export function getScoreStorageInfo(opts?: {
+    ahaHomeDir?: string;
+    cwd?: string;
+    homeDir?: string;
+}): ScoreStorageInfo {
+    const paths = resolveScoreStoragePaths(opts);
+    return {
+        ...paths,
+        existingPaths: paths.readablePaths.filter((scorePath) => existsSync(scorePath)),
+    };
 }
 
 function dedupeScores(scores: AgentScore[]): AgentScore[] {
@@ -202,7 +243,7 @@ export function readScores(): ScoreFile {
     const allScores: AgentScore[] = [];
     let version = '1.0';
 
-    for (const scorePath of getReadableScorePaths()) {
+    for (const scorePath of resolveScoreStoragePaths().readablePaths) {
         if (!existsSync(scorePath)) {
             continue;
         }
@@ -230,7 +271,7 @@ export function readScores(): ScoreFile {
  * Creates the directory and file if they do not exist.
  */
 export function writeScore(score: AgentScore): void {
-    const scorePath = getCanonicalScorePath();
+    const scorePath = resolveScoreStoragePaths().canonicalPath;
     const dir = dirname(scorePath);
 
     mkdirSync(dir, { recursive: true });

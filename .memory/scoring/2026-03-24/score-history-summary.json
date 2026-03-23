@@ -1,0 +1,115 @@
+{
+  "generatedAt": "2026-03-23T19:00:38.024Z",
+  "filters": {
+    "teamId": "6d609c73-84f9-4162-b0d6-c5dacb1e4fbc"
+  },
+  "storage": {
+    "canonicalPath": "/Users/copizza/.aha-v3/scores/agent_scores.json",
+    "legacyHomePath": "/Users/copizza/.aha/scores/agent_scores.json",
+    "legacyWorkingDirectoryPath": "/Users/copizza/Desktop/happyhere/aha-cli/.aha/scores/agent_scores.json",
+    "readablePaths": [
+      "/Users/copizza/.aha-v3/scores/agent_scores.json",
+      "/Users/copizza/.aha/scores/agent_scores.json",
+      "/Users/copizza/Desktop/happyhere/aha-cli/.aha/scores/agent_scores.json"
+    ],
+    "existingPaths": [
+      "/Users/copizza/.aha-v3/scores/agent_scores.json"
+    ]
+  },
+  "totals": {
+    "scores": 15,
+    "sessions": 5,
+    "roles": 3,
+    "teams": 1
+  },
+  "latestAt": "2026-03-23T18:46:50.036Z",
+  "distribution": {
+    "excellent": 3,
+    "good": 10,
+    "fair": 2,
+    "poor": 0
+  },
+  "byRole": [
+    {
+      "role": "builder",
+      "count": 9,
+      "avgOverall": 77.9,
+      "minOverall": 63,
+      "maxOverall": 86,
+      "latestOverall": 85,
+      "latestAt": "2026-03-23T18:46:48.834Z"
+    },
+    {
+      "role": "master",
+      "count": 3,
+      "avgOverall": 81,
+      "minOverall": 77,
+      "maxOverall": 84,
+      "latestOverall": 82,
+      "latestAt": "2026-03-23T18:46:50.036Z"
+    },
+    {
+      "role": "scout",
+      "count": 3,
+      "avgOverall": 82.7,
+      "minOverall": 75,
+      "maxOverall": 91,
+      "latestOverall": 91,
+      "latestAt": "2026-03-23T18:46:49.440Z"
+    }
+  ],
+  "bySession": [
+    {
+      "sessionId": "cmn3hbync003nqj239jnd1bvy",
+      "role": "master",
+      "count": 3,
+      "latestOverall": 82,
+      "latestAction": "keep",
+      "latestAt": "2026-03-23T18:46:50.036Z"
+    },
+    {
+      "sessionId": "cmn3hc9nv004dqj23tshhf87s",
+      "role": "scout",
+      "count": 3,
+      "latestOverall": 91,
+      "latestAction": "keep",
+      "latestAt": "2026-03-23T18:46:49.440Z"
+    },
+    {
+      "sessionId": "cmn3hc6lq0045qj23tv4dl8zo",
+      "role": "builder",
+      "count": 3,
+      "latestOverall": 85,
+      "latestAction": "keep",
+      "latestAt": "2026-03-23T18:46:48.834Z"
+    },
+    {
+      "sessionId": "cmn3hc3xq003zqj23gwl1x6a7",
+      "role": "builder",
+      "count": 3,
+      "latestOverall": 86,
+      "latestAction": "keep",
+      "latestAt": "2026-03-23T18:46:48.195Z"
+    },
+    {
+      "sessionId": "cmn3hc15h003rqj23maulmk9r",
+      "role": "builder",
+      "count": 3,
+      "latestOverall": 83,
+      "latestAction": "keep",
+      "latestAt": "2026-03-23T18:46:47.232Z"
+    }
+  ],
+  "byTeam": [
+    {
+      "teamId": "6d609c73-84f9-4162-b0d6-c5dacb1e4fbc",
+      "count": 15,
+      "roles": {
+        "master": 3,
+        "scout": 3,
+        "builder": 9
+      },
+      "latestAt": "2026-03-23T18:46:50.036Z"
+    }
+  ]
+}

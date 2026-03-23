@@ -196,6 +196,36 @@ function formatMessagingBehavior(spec: GenomeSpec): string {
     return `## Agent Role Config\n${deterministicStringify(payload)}`;
 }
 
+function formatToolConstraints(spec: GenomeSpec): string {
+    const allowedTools = normalizeStringArray(spec.allowedTools);
+    const disallowedTools = normalizeStringArray(spec.disallowedTools);
+
+    if (allowedTools.length === 0 && disallowedTools.length === 0) {
+        return '';
+    }
+
+    const payload: Record<string, unknown> = {};
+    if (allowedTools.length > 0) {
+        payload.allowedTools = allowedTools;
+    }
+    if (disallowedTools.length > 0) {
+        payload.disallowedTools = disallowedTools;
+    }
+
+    const lines = ['## Tool Constraints', deterministicStringify(payload)];
+
+    if (disallowedTools.length > 0) {
+        lines.push('- Treat disallowed tools as a hard operating policy even on runtimes that only enforce them via prompt text.');
+    }
+    if (allowedTools.length > 0) {
+        lines.push('- If a required action needs a tool outside the allowlist, stop and ask for a policy change instead of bypassing the restriction.');
+    }
+    if (disallowedTools.includes('Bash') || (allowedTools.length > 0 && !allowedTools.includes('Bash'))) {
+        lines.push('- Prefer specialized tools like Read, Grep, Glob, Edit, and Write for file operations instead of Bash.');
+    }
+
+    return lines.join('\n');
+}
 
 export function buildGenomeInjection(spec?: GenomeSpec | null, feedbackData?: string | null): string {
     if (!spec && !feedbackData) return '';
@@ -203,6 +233,7 @@ export function buildGenomeInjection(spec?: GenomeSpec | null, feedbackData?: st
     const sections = [
         ...(spec ? [
             formatMessagingBehavior(spec),
+            formatToolConstraints(spec),
             formatBulletSection('Genome Learnings', spec.memory?.learnings),
             formatIterationGuide(spec),
             formatBulletSection('Genome Specialties', spec.resume?.specialties),

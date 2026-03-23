@@ -446,6 +446,7 @@ export type Metadata = {
   archiveReason?: string,
   flavor?: string,
   codexCliVersion?: string,
+  codexSessionId?: string, // Codex transcript/session ID (used for runtime log lookup)
   role?: string,
   memberId?: string,
   sessionTag?: string,

@@ -4,6 +4,39 @@ const mockConfiguration = vi.hoisted(() => ({
     ahaHomeDir: '/tmp/test-aha',
 }));
 
+const mockSessionSyncClient = vi.hoisted(() => ({
+    waitUntilConnected: vi.fn(async () => {}),
+    sendUserTextMessage: vi.fn(),
+    flush: vi.fn(async () => {}),
+    close: vi.fn(async () => {}),
+}));
+
+const mockApiClientInstance = vi.hoisted(() => ({
+    getSession: vi.fn(async (sessionId: string) => ({
+        id: sessionId,
+        metadata: {},
+        metadataVersion: 1,
+        agentState: null,
+        agentStateVersion: 0,
+        encryptionKey: new Uint8Array([1, 2, 3]),
+        encryptionVariant: 'legacy' as const,
+        isDecrypted: true,
+    })),
+    sessionSyncClient: vi.fn(() => mockSessionSyncClient),
+}));
+
+const mockApiClient = vi.hoisted(() => ({
+    create: vi.fn(async () => mockApiClientInstance),
+}));
+
+const mockReadCredentials = vi.hoisted(() => vi.fn(async () => ({
+    token: 'test-token',
+    encryption: {
+        type: 'secret',
+        secret: new Uint8Array([1, 2, 3]),
+    },
+})));
+
 vi.mock('@/configuration', () => ({
     configuration: mockConfiguration,
 }));
@@ -13,6 +46,14 @@ vi.mock('@/ui/logger', () => ({
         debug: vi.fn(),
         debugLargeJson: vi.fn(),
     },
+}));
+
+vi.mock('@/api/api', () => ({
+    ApiClient: mockApiClient,
+}));
+
+vi.mock('@/persistence', () => ({
+    readCredentials: mockReadCredentials,
 }));
 
 import { startDaemonControlServer } from './controlServer';
@@ -202,5 +243,67 @@ describe('controlServer /heartbeat-ping', () => {
         });
 
         expect(response.ok).toBe(true);
+    });
+});
+
+describe('controlServer /session-command', () => {
+    let stopServer: () => Promise<void>;
+    let port: number;
+    const trackedSessions: TrackedSession[] = [];
+
+    beforeEach(async () => {
+        trackedSessions.length = 0;
+        mockReadCredentials.mockClear();
+        mockApiClient.create.mockClear();
+        mockApiClientInstance.getSession.mockClear();
+        mockApiClientInstance.sessionSyncClient.mockClear();
+        mockSessionSyncClient.waitUntilConnected.mockClear();
+        mockSessionSyncClient.sendUserTextMessage.mockClear();
+        mockSessionSyncClient.flush.mockClear();
+        mockSessionSyncClient.close.mockClear();
+
+        const result = await startDaemonControlServer({
+            getChildren: () => trackedSessions,
+            stopSession: () => false,
+            spawnSession: async () => ({ type: 'error' as const, error: 'not implemented' }),
+            requestShutdown: () => {},
+            onAhaSessionWebhook: () => {},
+        });
+
+        port = result.port;
+        stopServer = result.stop;
+    });
+
+    afterEach(async () => {
+        await stopServer();
+    });
+
+    it('injects commands into the live session via session socket', async () => {
+        trackedSessions.push({
+            startedBy: 'daemon',
+            ahaSessionId: 'session-1',
+            pid: 12345,
+            ahaSessionMetadataFromLocalWebhook: {
+                teamId: 'team-alpha',
+                role: 'builder',
+                flavor: 'codex',
+            } as any,
+        });
+
+        const response = await fetch(`http://127.0.0.1:${port}/session-command`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId: 'session-1', command: '/compact' }),
+        });
+
+        expect(response.ok).toBe(true);
+        await expect(response.json()).resolves.toEqual({ success: true });
+        expect(mockReadCredentials).toHaveBeenCalledTimes(1);
+        expect(mockApiClient.create).toHaveBeenCalledTimes(1);
+        expect(mockApiClientInstance.getSession).toHaveBeenCalledWith('session-1');
+        expect(mockSessionSyncClient.waitUntilConnected).toHaveBeenCalledWith(2000);
+        expect(mockSessionSyncClient.sendUserTextMessage).toHaveBeenCalledWith('/compact', { sentFrom: 'daemon-control-server' });
+        expect(mockSessionSyncClient.flush).toHaveBeenCalledTimes(1);
+        expect(mockSessionSyncClient.close).toHaveBeenCalledTimes(1);
     });
 });

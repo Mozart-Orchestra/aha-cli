@@ -3,7 +3,8 @@
 /**
  * backfill-scores.mjs — Push historical agent scores to genome-hub feedbackData
  *
- * Reads ~/.aha/scores/agent_scores.json, aggregates by target genome using
+ * Reads the canonical local score store (package-aware; usually ~/.aha-v3/scores/agent_scores.json
+ * for this repo, with ~/.aha/scores/agent_scores.json as legacy fallback), aggregates by target genome using
  * ROLE_TO_CANONICAL_GENOME mapping, and PATCHes to genome-hub.
  *
  * Usage: node aha-cli/scripts/backfill-scores.mjs [--dry-run] [--hub-url URL]
@@ -11,7 +12,7 @@
  * Idempotent: safe to run multiple times (overwrites feedbackData each time).
  */
 
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 
@@ -40,7 +41,28 @@ const ROLE_TO_CANONICAL_GENOME = {
 };
 
 // --- Load scores ---
-const scoresPath = join(homedir(), '.aha', 'scores', 'agent_scores.json');
+function resolveCandidateScorePaths() {
+  const explicitAhaHome = process.env.AHA_HOME_DIR?.replace(/^~/, homedir());
+  const canonicalAhaHome = explicitAhaHome || join(homedir(), '.aha-v3');
+  const legacyAhaHome = join(homedir(), '.aha');
+  const cwdLegacy = join(process.cwd(), '.aha');
+
+  return Array.from(new Set([
+    join(canonicalAhaHome, 'scores', 'agent_scores.json'),
+    join(legacyAhaHome, 'scores', 'agent_scores.json'),
+    join(cwdLegacy, 'scores', 'agent_scores.json'),
+  ]));
+}
+
+const candidatePaths = resolveCandidateScorePaths();
+const scoresPath = candidatePaths.find((candidate) => existsSync(candidate));
+if (!scoresPath) {
+  console.error('No score file found. Checked:');
+  for (const candidate of candidatePaths) {
+    console.error(`  - ${candidate}`);
+  }
+  process.exit(1);
+}
 console.log(`Reading scores from: ${scoresPath}`);
 const raw = JSON.parse(readFileSync(scoresPath, 'utf-8'));
 const scores = raw.scores || [];

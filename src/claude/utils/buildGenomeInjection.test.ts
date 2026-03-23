@@ -42,4 +42,17 @@ describe('buildGenomeInjection', () => {
         expect(injection).not.toContain('## Runtime Identity');
         expect(injection).not.toContain('## Activation Rules');
     });
+
+    it('includes tool constraints with Codex-safe operating guidance', () => {
+        const injection = buildGenomeInjection({
+            allowedTools: ['Read', 'Grep'],
+            disallowedTools: ['Bash'],
+        });
+
+        expect(injection).toContain('## Tool Constraints');
+        expect(injection).toContain('"allowedTools":["Grep","Read"]');
+        expect(injection).toContain('"disallowedTools":["Bash"]');
+        expect(injection).toContain('Treat disallowed tools as a hard operating policy');
+        expect(injection).toContain('Prefer specialized tools like Read, Grep, Glob, Edit, and Write');
+    });
 });

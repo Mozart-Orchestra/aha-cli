@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { buildReflexivityFixture } from '../fixtures'
-import { buildTurnsFromResponsePayload, fixtureExampleCommand, scoreCaseCommand } from '../command'
+import { buildTurnsFromResponsePayload, fixtureExampleCommand, runSuiteCommand, scoreCaseCommand } from '../command'
 
 describe('reflexivity command helpers', () => {
     it('builds prompt turns from structured response payload', () => {
@@ -91,5 +91,59 @@ describe('reflexivity command helpers', () => {
 
         expect(result.ok).toBe(true)
         expect((result.data as any).schemaVersion).toBe('reflexivity-fixture-v1')
+    })
+
+    it('runs a suite bundle and writes report artifacts', async () => {
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'reflexivity-run-'))
+        const fixturePath = path.join(tmp, 'fixture.json')
+        const responsesPath = path.join(tmp, 'responses.json')
+        const outputDir = path.join(tmp, 'out')
+
+        const fixture = buildReflexivityFixture({
+            fixtureId: 'fx-run',
+            snapshots: {
+                identitySnapshot: { role: 'builder' },
+            },
+        })
+        fs.writeFileSync(fixturePath, JSON.stringify(fixture, null, 2), 'utf-8')
+        fs.writeFileSync(responsesPath, JSON.stringify({
+            'RFX-SELF-001': [{
+                answer: '我是 builder',
+                claims: [{ claimType: 'role', subject: 'self', value: 'builder', status: 'known', source: 'self_view' }],
+                unknowns: [],
+                limitations: [],
+                corrections: [],
+                confidence: 'high',
+            }],
+        }, null, 2), 'utf-8')
+
+        const result = await runSuiteCommand({
+            flags: {
+                json: false,
+                verbose: false,
+                quiet: false,
+                yes: false,
+                help: false,
+                positional: [],
+                options: new Map([
+                    ['fixture', fixturePath],
+                    ['responses', responsesPath],
+                    ['case-ids', 'RFX-SELF-001'],
+                    ['out', outputDir],
+                    ['base-name', 'smoke'],
+                ]),
+                flags: new Set(),
+            },
+            args: [],
+            api: async () => {
+                throw new Error('not used')
+            },
+        })
+
+        expect(result.ok).toBe(true)
+        expect((result.data as any).report.summary.totalCases).toBe(1)
+        expect(fs.existsSync(path.join(outputDir, 'smoke.json'))).toBe(true)
+        expect(fs.existsSync(path.join(outputDir, 'smoke.md'))).toBe(true)
+        expect(fs.existsSync(path.join(outputDir, 'summary.json'))).toBe(true)
     })
 })

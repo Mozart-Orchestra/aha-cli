@@ -202,11 +202,20 @@ export function getContextStatusReport(options: {
 
     const runtimeType = metadata?.flavor === 'codex' ? 'codex' : 'claude';
     if (runtimeType === 'codex') {
-        const codexFile = findCodexTranscriptFile(homeDir, options.ahaSessionId);
-        if (!codexFile) {
-            throw new Error('Codex transcript not found. Cannot determine context status.');
+        const candidateIds = [
+            requestedSessionId,
+            metadata?.codexSessionId,
+            options.ahaSessionId,
+        ].filter((value, index, array): value is string => Boolean(value) && array.indexOf(value) === index);
+
+        for (const candidateId of candidateIds) {
+            const codexFile = findCodexTranscriptFile(homeDir, candidateId);
+            if (codexFile) {
+                return buildCodexContextStatus(codexFile);
+            }
         }
-        return buildCodexContextStatus(codexFile);
+
+        throw new Error('Codex transcript not found. Cannot determine context status.');
     }
 
     const claudeSessionId = requestedSessionId || metadata?.claudeSessionId;

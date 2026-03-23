@@ -5,7 +5,7 @@
  *
  * ── Data architecture ──────────────────────────────────────────────────────
  *
- *   Local .aha/scores/agent_scores.json   ← NEVER modified here
+ *   Local <ahaHomeDir>/scores/agent_scores.json   ← NEVER modified here
  *     Full fidelity record kept for internal audit and traceability:
  *     sessionId, teamId, scorer, evidence (raw tool calls), recommendations
  *

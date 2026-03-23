@@ -969,6 +969,28 @@ export async function runCodex(opts: {
 
     const client = new CodexMcpClient();
 
+    let lastSyncedCodexSessionId = metadata.codexSessionId || null;
+
+    function syncCodexSessionIdToMetadataIfNeeded(source: 'event' | 'start' | 'continue') {
+        const codexSessionId = client.getSessionId()?.trim() || null;
+        if (!codexSessionId || codexSessionId === lastSyncedCodexSessionId) {
+            return;
+        }
+
+        lastSyncedCodexSessionId = codexSessionId;
+        metadata.codexSessionId = codexSessionId;
+        session.updateMetadata((currentMetadata) => {
+            if (currentMetadata.codexSessionId === codexSessionId) {
+                return currentMetadata;
+            }
+            return {
+                ...currentMetadata,
+                codexSessionId,
+            };
+        });
+        logger.debug(`[Codex] Synced codexSessionId=${codexSessionId} to session metadata via ${source}`);
+    }
+
     // Helper: find Codex session transcript for a given sessionId
     function findCodexResumeFile(sessionId: string | null): string | null {
         if (!sessionId) return null;
@@ -1032,6 +1054,7 @@ export async function runCodex(opts: {
     client.setHandler((rawMsg) => {
         const msg = unwrapCodexEvent(rawMsg);
         logger.debug(`[Codex] MCP message: ${JSON.stringify(msg)}`);
+        syncCodexSessionIdToMetadataIfNeeded('event');
 
         // item_completed events duplicate content already delivered via agent_message / agent_reasoning.
         // Skip them entirely to prevent 2-3x message repetition in context.
@@ -1660,6 +1683,7 @@ Always reflect progress on the board and call these tools whenever you start or 
                         startConfig,
                         { signal: abortController.signal }
                     );
+                    syncCodexSessionIdToMetadataIfNeeded('start');
                     wasCreated = true;
                     first = false;
                 } else {
@@ -1668,6 +1692,7 @@ Always reflect progress on the board and call these tools whenever you start or 
                         { signal: abortController.signal }
                     );
                     logger.debug('[Codex] continueSession response:', response);
+                    syncCodexSessionIdToMetadataIfNeeded('continue');
                 }
             } catch (error) {
                 logger.warn('Error in codex session:', error);

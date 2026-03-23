@@ -1,0 +1,159 @@
+- id: aha-cli-arch-001
+  fact: "aha-cli 的主入口是 src/index.ts；CLI 入口只做轻量参数分流，实际能力下沉到 commands、daemon、claude、codex、reflexivity 等子系统。"
+  category: status
+  timestamp: "2026-03-24"
+  source: "2026-03-24"
+  status: active
+  superseded_by: null
+  related_entities:
+    - happyhere/aha-cli/src/index.ts
+  last_accessed: "2026-03-24"
+  access_count: 1
+
+- id: aha-cli-arch-002
+  fact: "aha-cli 的平台核心在 src/daemon/run.ts 一带，负责 daemon 生命周期、machine 注册、heartbeat、control server、session lifecycle 与 supervisor cycle。"
+  category: status
+  timestamp: "2026-03-24"
+  source: "2026-03-24"
+  status: active
+  superseded_by: null
+  related_entities:
+    - happyhere/aha-cli/src/daemon/run.ts
+    - happyhere/aha-cli/src/daemon/controlServer.ts
+    - happyhere/aha-cli/src/daemon/sessionManager.ts
+  last_accessed: "2026-03-24"
+  access_count: 1
+
+- id: aha-cli-arch-003
+  fact: "aha-cli 同时维护 Claude 与 Codex 两条 runtime 适配链路，其中 Codex runtime 还承担 MCP 事件转译、team 协作接入与状态展示。"
+  category: status
+  timestamp: "2026-03-24"
+  source: "2026-03-24"
+  status: active
+  superseded_by: null
+  related_entities:
+    - happyhere/aha-cli/src/claude
+    - happyhere/aha-cli/src/codex/runCodex.ts
+  last_accessed: "2026-03-24"
+  access_count: 1
+
+- id: aha-cli-improve-001
+  fact: "当前 Codex 会话里 get_context_status 失败，报错为 Codex transcript not found；这暴露了 contextStatus 对 Codex transcript 文件定位链路的脆弱性。"
+  category: status
+  timestamp: "2026-03-24"
+  source: "2026-03-24"
+  status: active
+  superseded_by: null
+  related_entities:
+    - happyhere/aha-cli/src/claude/utils/contextStatus.ts
+    - happyhere/aha-cli/src/claude/utils/runtimeLogReader.ts
+  last_accessed: "2026-03-24"
+  access_count: 1
+
+- id: aha-cli-improve-002
+  fact: "src/daemon/supervisor.ts 中关于 /session-command 的注释已落后于 src/daemon/controlServer.ts 的真实实现，说明 daemon/supervisor 文档与实现存在漂移。"
+  category: status
+  timestamp: "2026-03-24"
+  source: "2026-03-24"
+  status: active
+  superseded_by: null
+  related_entities:
+    - happyhere/aha-cli/src/daemon/supervisor.ts
+    - happyhere/aha-cli/src/daemon/controlServer.ts
+  last_accessed: "2026-03-24"
+  access_count: 1
+
+- id: aha-cli-rootcause-001
+  fact: "Codex get_context_status 报 transcript not found 的根因，是 contextStatus 用 ahaSessionId 查找 transcript 文件，但真实 Codex transcript 文件名后缀是 codexSessionId/session_meta.payload.id。"
+  category: status
+  timestamp: "2026-03-24"
+  source: "2026-03-24"
+  status: active
+  superseded_by: null
+  related_entities:
+    - happyhere/aha-cli/src/claude/utils/contextStatus.ts
+    - happyhere/aha-cli/src/codex/runCodex.ts
+    - happyhere/aha-cli/src/api/types.ts
+  last_accessed: "2026-03-24"
+  access_count: 1
+
+- id: aha-cli-rootcause-002
+  fact: "修复策略是把 Codex runtime 的真实 codexSessionId 同步进 session metadata，再让 getContextStatusReport 优先用 metadata.codexSessionId 查 transcript，并保留对旧 ahaSessionId 命名的兼容回退。"
+  category: decision
+  timestamp: "2026-03-24"
+  source: "2026-03-24"
+  status: active
+  superseded_by: null
+  related_entities:
+    - happyhere/aha-cli/src/claude/utils/contextStatus.ts
+    - happyhere/aha-cli/src/codex/runCodex.ts
+  last_accessed: "2026-03-24"
+  access_count: 1
+
+- id: aha-cli-rootcause-003
+  fact: "compact_agent 的生产入口实际上走 claude/mcp/supervisorTools.ts -> daemon /session-command；src/daemon/supervisor.ts 当前是未接入的漂移 helper。"
+  category: status
+  timestamp: "2026-03-24"
+  source: "2026-03-24"
+  status: active
+  superseded_by: null
+  related_entities:
+    - happyhere/aha-cli/src/claude/mcp/supervisorTools.ts
+    - happyhere/aha-cli/src/daemon/supervisor.ts
+    - happyhere/aha-cli/src/daemon/controlServer.ts
+  last_accessed: "2026-03-24"
+  access_count: 1
+
+- id: aha-cli-rootcause-004
+  fact: "session-command 直接写 child stdin 与 headless remote session 的真实接收路径不一致；更稳的实现是通过 session socket 注入 user message。"
+  category: decision
+  timestamp: "2026-03-24"
+  source: "2026-03-24"
+  status: active
+  superseded_by: null
+  related_entities:
+    - happyhere/aha-cli/src/daemon/controlServer.ts
+    - happyhere/aha-cli/src/api/apiSession.ts
+  last_accessed: "2026-03-24"
+  access_count: 1
+
+- id: aha-cli-rootcause-005
+  fact: "resumeClaudeAgent helper 原先使用错误 env 名 AHA_RESUME_SESSION_ID；与 runClaude/sessionManager 实际使用的 AHA_RECOVER_SESSION_ID 不一致。"
+  category: status
+  timestamp: "2026-03-24"
+  source: "2026-03-24"
+  status: active
+  superseded_by: null
+  related_entities:
+    - happyhere/aha-cli/src/daemon/supervisor.ts
+    - happyhere/aha-cli/src/daemon/sessionManager.ts
+    - happyhere/aha-cli/src/claude/runClaude.ts
+  last_accessed: "2026-03-24"
+  access_count: 1
+
+- id: aha-cli-rollout-001
+  fact: "Codex runtime 当前没有和 Claude 等价的 genome tool hard enforcement；Phase 3 先通过 buildGenomeInjection 输出 Tool Constraints，把 allowedTools/disallowedTools 作为 prompt-level 软约束注入。"
+  category: decision
+  timestamp: "2026-03-24"
+  source: "2026-03-24"
+  status: active
+  superseded_by: null
+  related_entities:
+    - happyhere/aha-cli/src/claude/utils/buildGenomeInjection.ts
+    - happyhere/aha-cli/src/codex/runCodex.ts
+    - happyhere/aha-cli/src/codex/utils/permissionHandler.ts
+  last_accessed: "2026-03-24"
+  access_count: 1
+
+- id: aha-cli-rollout-002
+  fact: "CodexPermissionHandler 自动 deny disallowed tools 目前是中高复杂度：它只截获 exec approval 并把请求统一视为 CodexBash，缺少 genome tool policy 输入，也未证明所有目标工具都会经过同一 permission hook。"
+  category: status
+  timestamp: "2026-03-24"
+  source: "2026-03-24"
+  status: active
+  superseded_by: null
+  related_entities:
+    - happyhere/aha-cli/src/codex/codexMcpClient.ts
+    - happyhere/aha-cli/src/codex/utils/permissionHandler.ts
+  last_accessed: "2026-03-24"
+  access_count: 1

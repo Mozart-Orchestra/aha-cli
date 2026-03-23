@@ -10,7 +10,7 @@
  * Inbound path:
  *   IMChannel.onInbound → ChannelRouter.handleInbound
  *   → command? → CommandExecutor
- *   → chat?    → daemon POST /session-command (inject into agent stdin)
+ *   → chat?    → daemon POST /session-command (inject into live agent session)
  *
  * Push policy filtering:
  *   'all'       — every message

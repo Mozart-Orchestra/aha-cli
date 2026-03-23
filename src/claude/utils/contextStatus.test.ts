@@ -46,7 +46,7 @@ describe('getContextStatusReport', () => {
         const sessionDir = join(homeDir, '.codex', 'sessions', '2026', '03', '20');
         mkdirSync(sessionDir, { recursive: true });
 
-        const filePath = join(sessionDir, 'rollout-2026-03-20T00-00-00-aha-session-2.jsonl');
+        const filePath = join(sessionDir, 'rollout-2026-03-20T00-00-00-codex-session-2.jsonl');
         writeFileSync(filePath, [
             JSON.stringify({
                 timestamp: '2026-03-20T00:00:00.000Z',
@@ -80,6 +80,7 @@ describe('getContextStatusReport', () => {
             ahaSessionId: 'aha-session-2',
             metadata: {
                 flavor: 'codex',
+                codexSessionId: 'codex-session-2',
             } as any,
         });
 
@@ -89,5 +90,49 @@ describe('getContextStatusReport', () => {
         expect(report.usedPercent).toBe(50);
         expect(report.status).toContain('MODERATE');
         expect(report.rateLimits).toBeDefined();
+    });
+
+    it('falls back to ahaSessionId for legacy Codex transcript naming', () => {
+        const homeDir = mkdtempSync(join(tmpdir(), 'aha-context-codex-legacy-'));
+        const sessionDir = join(homeDir, '.codex', 'sessions', '2026', '03', '20');
+        mkdirSync(sessionDir, { recursive: true });
+
+        const filePath = join(sessionDir, 'rollout-2026-03-20T00-00-00-aha-session-legacy.jsonl');
+        writeFileSync(filePath, [
+            JSON.stringify({
+                timestamp: '2026-03-20T00:00:00.000Z',
+                type: 'event_msg',
+                payload: {
+                    type: 'token_count',
+                    info: {
+                        total_token_usage: {
+                            input_tokens: 10000,
+                            cached_input_tokens: 2000,
+                            output_tokens: 200,
+                            reasoning_output_tokens: 50,
+                        },
+                        last_token_usage: {
+                            input_tokens: 10000,
+                            cached_input_tokens: 2000,
+                            output_tokens: 200,
+                            reasoning_output_tokens: 50,
+                        },
+                        model_context_window: 40000,
+                    },
+                },
+            }),
+        ].join('\n'), 'utf-8');
+
+        const report = getContextStatusReport({
+            homeDir,
+            ahaSessionId: 'aha-session-legacy',
+            metadata: {
+                flavor: 'codex',
+            } as any,
+        });
+
+        expect(report.runtimeType).toBe('codex');
+        expect(report.currentContextK).toBe(12);
+        expect(report.contextLimitK).toBe(40);
     });
 });

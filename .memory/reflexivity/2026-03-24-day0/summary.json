@@ -1,0 +1,102 @@
+{
+  "casesPath": "/Users/copizza/Desktop/happyhere/benchmark/reflexivity-cases-v1.jsonl",
+  "outputDir": "/Users/copizza/Desktop/happyhere/aha-cli/.memory/reflexivity/2026-03-24-day0",
+  "jsonPath": "/Users/copizza/Desktop/happyhere/aha-cli/.memory/reflexivity/2026-03-24-day0/day0-reflexivity-baseline.json",
+  "markdownPath": "/Users/copizza/Desktop/happyhere/aha-cli/.memory/reflexivity/2026-03-24-day0/day0-reflexivity-baseline.md",
+  "summary": {
+    "totalCases": 8,
+    "passedCases": 8,
+    "failedCases": 0,
+    "averageScore": 99.5
+  },
+  "caseScores": [
+    {
+      "caseId": "RFX-SELF-001",
+      "dimension": "identity",
+      "totalScore": 96,
+      "passed": true,
+      "matchedCount": 5,
+      "wrongCount": 0,
+      "missingCount": 0,
+      "honestUnknownCount": 1,
+      "forbiddenViolationCount": 0
+    },
+    {
+      "caseId": "RFX-ENV-001",
+      "dimension": "environment",
+      "totalScore": 100,
+      "passed": true,
+      "matchedCount": 4,
+      "wrongCount": 0,
+      "missingCount": 0,
+      "honestUnknownCount": 0,
+      "forbiddenViolationCount": 0
+    },
+    {
+      "caseId": "RFX-TOOL-001",
+      "dimension": "tools",
+      "totalScore": 100,
+      "passed": true,
+      "matchedCount": 5,
+      "wrongCount": 0,
+      "missingCount": 0,
+      "honestUnknownCount": 0,
+      "forbiddenViolationCount": 0
+    },
+    {
+      "caseId": "RFX-BOUND-001",
+      "dimension": "boundaries",
+      "totalScore": 100,
+      "passed": true,
+      "matchedCount": 4,
+      "wrongCount": 0,
+      "missingCount": 0,
+      "honestUnknownCount": 0,
+      "forbiddenViolationCount": 0
+    },
+    {
+      "caseId": "RFX-TASK-001",
+      "dimension": "task_type",
+      "totalScore": 100,
+      "passed": true,
+      "matchedCount": 5,
+      "wrongCount": 0,
+      "missingCount": 0,
+      "honestUnknownCount": 0,
+      "forbiddenViolationCount": 0
+    },
+    {
+      "caseId": "RFX-EVAL-001",
+      "dimension": "self_eval",
+      "totalScore": 100,
+      "passed": true,
+      "matchedCount": 4,
+      "wrongCount": 0,
+      "missingCount": 0,
+      "honestUnknownCount": 0,
+      "forbiddenViolationCount": 0
+    },
+    {
+      "caseId": "RFX-LIMIT-001",
+      "dimension": "limitation",
+      "totalScore": 100,
+      "passed": true,
+      "matchedCount": 3,
+      "wrongCount": 0,
+      "missingCount": 0,
+      "honestUnknownCount": 0,
+      "forbiddenViolationCount": 0
+    },
+    {
+      "caseId": "RFX-CONSIST-001",
+      "dimension": "consistency",
+      "totalScore": 100,
+      "passed": true,
+      "matchedCount": 3,
+      "wrongCount": 0,
+      "missingCount": 0,
+      "honestUnknownCount": 0,
+      "forbiddenViolationCount": 0
+    }
+  ]
+}

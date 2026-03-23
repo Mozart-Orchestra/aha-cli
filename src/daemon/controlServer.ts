@@ -8,6 +8,8 @@ import { z } from 'zod';
 import { serializerCompiler, validatorCompiler, ZodTypeProvider } from 'fastify-type-provider-zod';
 import { logger } from '@/ui/logger';
 import { Metadata } from '@/api/types';
+import { ApiClient } from '@/api/api';
+import { readCredentials } from '@/persistence';
 import { TrackedSession } from './types';
 import { SpawnSessionOptions, SpawnSessionResult } from '@/modules/common/registerCommonHandlers';
 
@@ -187,18 +189,49 @@ export function startDaemonControlServer({
         return { success: false, error: `Session ${sessionId} not tracked by daemon` };
       }
 
-      // Write command to stdin if the child process is available
+      // Primary path: inject a user message via the session socket so this works for
+      // daemon-spawned headless agents too (no TTY/stdin assumptions).
+      try {
+        const credentials = await readCredentials();
+        if (!credentials) {
+          throw new Error('No saved credentials available for session command injection');
+        }
+
+        const api = await ApiClient.create(credentials);
+        const liveSession = await api.getSession(sessionId);
+        if (!liveSession) {
+          throw new Error(`Session ${sessionId} not found on server`);
+        }
+        if (!liveSession.isDecrypted || !liveSession.encryptionKey || !liveSession.encryptionVariant) {
+          throw new Error(`Session ${sessionId} could not be decrypted for command injection`);
+        }
+
+        const syncClient = api.sessionSyncClient(liveSession as any);
+        try {
+          await syncClient.waitUntilConnected(2000);
+          syncClient.sendUserTextMessage(command, { sentFrom: 'daemon-control-server' });
+          await syncClient.flush();
+          logger.debug(`[CONTROL SERVER] Injected '${command}' into session ${sessionId} via session socket`);
+          return { success: true };
+        } finally {
+          await syncClient.close().catch(() => {});
+        }
+      } catch (err) {
+        logger.debug(`[CONTROL SERVER] Session socket injection failed for ${sessionId}: ${String(err)}`);
+      }
+
+      // Legacy fallback: if stdin is available, still try it.
       if (target.childProcess && target.childProcess.stdin && !target.childProcess.stdin.destroyed) {
         try {
           target.childProcess.stdin.write(command + '\n');
-          logger.debug(`[CONTROL SERVER] Wrote '${command}' to stdin of ${sessionId}`);
+          logger.debug(`[CONTROL SERVER] Fallback-wrote '${command}' to stdin of ${sessionId}`);
           return { success: true };
         } catch (err) {
-          return { success: false, error: `Failed to write to stdin: ${String(err)}` };
+          return { success: false, error: `Failed to inject command via session socket and stdin: ${String(err)}` };
         }
       }
 
-      return { success: false, error: `Session ${sessionId} has no writable stdin (externally started or stdin closed)` };
+      return { success: false, error: `Session ${sessionId} could not be injected via session socket and has no writable stdin fallback` };
     });
 
     // Stop specific session
