@@ -59,7 +59,23 @@ export function registerSupervisorTools(ctx: McpToolContext): void {
         parseBoardFromArtifact,
         triggerHelpLane,
         getTaskStateManager,
+        getCurrentTeamMemberContext,
     } = ctx;
+
+    // ── Authorities helper ────────────────────────────────────────────────
+    // Checks whether the caller has a specific authority via genome spec,
+    // team member record, or team overlay — falling back to false on error.
+    const hasAuthority = async (authority: string): Promise<boolean> => {
+        const metadata = client.getMetadata();
+        const teamId = metadata?.teamId || metadata?.roomId;
+        if (!teamId) return false;
+        try {
+            const { authorities } = await getCurrentTeamMemberContext(teamId);
+            return authorities.includes(authority);
+        } catch {
+            return false;
+        }
+    };
 
     const resolveInspectionSubject = async (requestedSessionId?: string): Promise<{
         sessionId: string;
@@ -203,8 +219,9 @@ export function registerSupervisorTools(ctx: McpToolContext): void {
         },
     }, async (args) => {
         const role = client.getMetadata()?.role;
-        if (role !== 'supervisor' && role !== 'help-agent') {
-            return { content: [{ type: 'text', text: 'Error: Only supervisor/help-agent can read team logs.' }], isError: true };
+        const roleAllowed = role === 'supervisor' || role === 'help-agent';
+        if (!roleAllowed && !await hasAuthority('genome.evolve')) {
+            return { content: [{ type: 'text', text: 'Error: Only supervisor/help-agent or agents with genome.evolve authority can read team logs.' }], isError: true };
         }
         if (!/^[a-zA-Z0-9_-]+$/.test(args.teamId)) {
             return { content: [{ type: 'text', text: 'Error: Invalid teamId format.' }], isError: true };
@@ -632,8 +649,9 @@ export function registerSupervisorTools(ctx: McpToolContext): void {
         },
     }, async (args) => {
         const callerRole = client.getMetadata()?.role;
-        if (callerRole !== 'supervisor' && callerRole !== 'org-manager' && callerRole !== 'master') {
-            return { content: [{ type: 'text', text: `Error: Role '${callerRole}' cannot inspect genome specs.` }], isError: true };
+        const roleAllowed = callerRole === 'supervisor' || callerRole === 'org-manager' || callerRole === 'master';
+        if (!roleAllowed && !await hasAuthority('genome.evolve')) {
+            return { content: [{ type: 'text', text: `Error: Role '${callerRole}' cannot inspect genome specs (requires supervisor/org-manager/master role or genome.evolve authority).` }], isError: true };
         }
 
         try {
@@ -673,8 +691,9 @@ export function registerSupervisorTools(ctx: McpToolContext): void {
         },
     }, async (args) => {
         const role = client.getMetadata()?.role;
-        if (role !== 'supervisor' && role !== 'help-agent') {
-            return { content: [{ type: 'text', text: 'Error: Only supervisor/help-agent can read CC logs.' }], isError: true };
+        const roleAllowed = role === 'supervisor' || role === 'help-agent';
+        if (!roleAllowed && !await hasAuthority('genome.evolve')) {
+            return { content: [{ type: 'text', text: 'Error: Only supervisor/help-agent or agents with genome.evolve authority can read CC logs.' }], isError: true };
         }
         try {
             const metadata = client.getMetadata();
@@ -883,9 +902,11 @@ export function registerSupervisorTools(ctx: McpToolContext): void {
         // Master needs this to close the scoring feedback loop when no supervisor
         // is available (e.g., master cannot spawn supervisor due to genome constraints).
         // Without this, the entire scoring pipeline is blocked.
+        // Also allow agents with genome.evolve authority for self-evolution pipeline.
         const scoringAllowedRoles = ['supervisor', 'help-agent', 'master', 'orchestrator', 'org-manager'];
-        if (!role || !scoringAllowedRoles.includes(role)) {
-            return { content: [{ type: 'text', text: 'Error: Only supervisor, help-agent, or coordinator roles can score agents.' }], isError: true };
+        const roleAllowed = role != null && scoringAllowedRoles.includes(role);
+        if (!roleAllowed && !await hasAuthority('genome.evolve')) {
+            return { content: [{ type: 'text', text: 'Error: Only supervisor, help-agent, coordinator roles, or agents with genome.evolve authority can score agents.' }], isError: true };
         }
 
         // ── Trace: score_started ────────────────────────────────────
@@ -1203,8 +1224,8 @@ export function registerSupervisorTools(ctx: McpToolContext): void {
         },
     }, async (args) => {
         const callerRole = client.getMetadata()?.role;
-        if (callerRole !== 'supervisor') {
-            return { content: [{ type: 'text', text: 'Error: Only supervisor can update genome feedback.' }], isError: true };
+        if (callerRole !== 'supervisor' && !await hasAuthority('genome.evolve')) {
+            return { content: [{ type: 'text', text: 'Error: Only supervisor or agents with genome.evolve authority can update genome feedback.' }], isError: true };
         }
 
         let resolvedNamespace = args.genomeNamespace;
@@ -1342,8 +1363,8 @@ export function registerSupervisorTools(ctx: McpToolContext): void {
         },
     }, async (args) => {
         const callerRole = client.getMetadata()?.role;
-        if (callerRole !== 'supervisor' && callerRole !== 'org-manager') {
-            return { content: [{ type: 'text', text: 'Error: Only supervisor or org-manager can evolve genomes.' }], isError: true };
+        if (callerRole !== 'supervisor' && !await hasAuthority('genome.evolve')) {
+            return { content: [{ type: 'text', text: 'Error: Only supervisor or agents with genome.evolve authority can evolve genomes.' }], isError: true };
         }
 
         const hubUrl = process.env.GENOME_HUB_URL ?? DEFAULT_GENOME_HUB_URL;
@@ -1746,8 +1767,8 @@ export function registerSupervisorTools(ctx: McpToolContext): void {
         },
     }, async (args) => {
         const callerRole = client.getMetadata()?.role;
-        if (callerRole !== 'supervisor' && callerRole !== 'org-manager') {
-            return { content: [{ type: 'text', text: 'Error: Only supervisor or org-manager can compare genome versions.' }], isError: true };
+        if (callerRole !== 'supervisor' && !await hasAuthority('genome.evolve')) {
+            return { content: [{ type: 'text', text: 'Error: Only supervisor or agents with genome.evolve authority can compare genome versions.' }], isError: true };
         }
 
         const hubUrl = process.env.GENOME_HUB_URL ?? DEFAULT_GENOME_HUB_URL;
@@ -2126,8 +2147,9 @@ export function registerSupervisorTools(ctx: McpToolContext): void {
         },
     }, async (args) => {
         const role = client.getMetadata()?.role;
-        if (role !== 'supervisor' && role !== 'help-agent') {
-            return { content: [{ type: 'text', text: 'Error: Only supervisor/help-agent can use this tool.' }], isError: true };
+        const roleAllowed = role === 'supervisor' || role === 'help-agent';
+        if (!roleAllowed && !await hasAuthority('genome.evolve')) {
+            return { content: [{ type: 'text', text: 'Error: Only supervisor/help-agent or agents with genome.evolve authority can use this tool.' }], isError: true };
         }
         if (!/^[a-zA-Z0-9_-]+$/.test(args.teamId)) {
             return { content: [{ type: 'text', text: 'Error: Invalid teamId format.' }], isError: true };
@@ -2179,8 +2201,9 @@ export function registerSupervisorTools(ctx: McpToolContext): void {
         },
     }, async (args) => {
         const role = client.getMetadata()?.role;
-        if (role !== 'supervisor' && role !== 'help-agent') {
-            return { content: [{ type: 'text', text: 'Error: Only supervisor/help-agent can read runtime logs.' }], isError: true };
+        const roleAllowed = role === 'supervisor' || role === 'help-agent';
+        if (!roleAllowed && !await hasAuthority('genome.evolve')) {
+            return { content: [{ type: 'text', text: 'Error: Only supervisor/help-agent or agents with genome.evolve authority can read runtime logs.' }], isError: true };
         }
         try {
             const result = readRuntimeLog({
@@ -2214,8 +2237,9 @@ export function registerSupervisorTools(ctx: McpToolContext): void {
         },
     }, async (args) => {
         const role = client.getMetadata()?.role;
-        if (role !== 'supervisor' && role !== 'help-agent') {
-            return { content: [{ type: 'text', text: 'Error: Only supervisor/help-agent can use this tool.' }], isError: true };
+        const roleAllowed = role === 'supervisor' || role === 'help-agent';
+        if (!roleAllowed && !await hasAuthority('genome.evolve')) {
+            return { content: [{ type: 'text', text: 'Error: Only supervisor/help-agent or agents with genome.evolve authority can use this tool.' }], isError: true };
         }
         try {
             const daemonState = await readDaemonState();
