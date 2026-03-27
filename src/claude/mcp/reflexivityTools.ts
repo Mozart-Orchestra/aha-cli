@@ -168,14 +168,17 @@ export function registerReflexivityTools(ctx: McpToolContext): void {
             description: [
                 'Score a reflexivity self-awareness case.',
                 'Provide a caseId, a fixture (from reflexivity_build_fixture), and your response turns.',
-                'Each turn should have: { answer, claims: [...], unknowns: [...], limitations: [...], corrections: [...], confidence }.',
+                'Each turn: { answer: string, claims: [{ claimType: string (required), value?: string|string[]|boolean, status?: "known"|"unknown"|"error"|"permission_denied"|"corrected", source?: string, subject?: string, justification?: string }], unknowns?: string[], limitations?: string[], corrections?: string[], confidence?: "high"|"medium"|"low" }.',
+                'claims[].claimType must be non-empty (e.g. "identity", "role", "team_name"). confidence is an enum, not a number.',
                 'Returns accuracy, completeness, honesty, and consistency scores.',
             ].join(' '),
             title: 'Reflexivity Score Case',
             inputSchema: {
                 caseId: z.string().describe('Reflexivity case ID (e.g. RFX-SELF-001)'),
                 fixture: z.record(z.unknown()).describe('Fixture JSON from reflexivity_build_fixture'),
-                responses: z.array(z.record(z.unknown())).describe('Array of structured turn answers, one per prompt in the case'),
+                responses: z.array(z.record(z.unknown())).describe(
+                    'Array of structured turn answers, one per prompt. Each item: { answer: string, claims: [{ claimType: string (required, non-empty), value?: string|string[]|boolean, status?: "known"|"unknown"|"error"|"permission_denied"|"corrected" (default: "known"), source?: string, subject?: string }], unknowns?: string[], limitations?: string[], corrections?: string[], confidence?: "high"|"medium"|"low" }',
+                ),
             },
         },
         async (args) => {
