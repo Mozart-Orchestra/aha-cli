@@ -145,7 +145,7 @@ export function registerMirrorTools(ctx: McpToolContext): void {
                         type: 'text' as const,
                         text: JSON.stringify({
                             converged: convergence.converged,
-                            reason: convergence.convergenceReason ?? null,
+                            reason: convergence.convergenceReason ?? undefined,
                             depth: convergence.depth,
                             maxDepth: convergence.maxDepth,
                             scoreHistory: convergence.scoreHistory,
@@ -192,7 +192,7 @@ export function registerMirrorTools(ctx: McpToolContext): void {
                     maxDepth: z.number().describe('Maximum allowed depth'),
                     scoreHistory: z.array(z.number()).describe('Score history across iterations'),
                     converged: z.boolean().describe('Whether convergence has been reached'),
-                    convergenceReason: z.string().optional().describe('Reason convergence was declared'),
+                    convergenceReason: z.string().nullable().optional().describe('Reason convergence was declared'),
                 }).describe('Convergence state from mirror_check_convergence'),
                 dryRun: z.boolean().optional().describe('Whether this is a dry run (no actual evolution). Default: true'),
             },
