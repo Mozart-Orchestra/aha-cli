@@ -334,15 +334,10 @@ export class CodexMcpClient {
         }
     }
 
-    async disconnect(): Promise<void> {
-        if (!this.connected) return;
-
-        // Capture pid in case we need to force-kill
+    private async closeTransport(): Promise<void> {
         const pid = this.transport?.pid ?? null;
-        logger.debug(`[CodexMCP] Disconnecting; child pid=${pid ?? 'none'}`);
 
         try {
-            // Ask client to close the transport
             logger.debug('[CodexMCP] client.close begin');
             await this.client.close();
             logger.debug('[CodexMCP] client.close done');
@@ -358,7 +353,7 @@ export class CodexMcpClient {
         // As a last resort, if child still exists, send SIGKILL
         if (pid) {
             try {
-                process.kill(pid, 0); // check if alive
+                process.kill(pid, 0);
                 logger.debug('[CodexMCP] Child still alive, sending SIGKILL');
                 try { process.kill(pid, 'SIGKILL'); } catch { }
             } catch { /* not running */ }
@@ -366,8 +361,27 @@ export class CodexMcpClient {
 
         this.transport = null;
         this.connected = false;
+    }
+
+    async disconnect(): Promise<void> {
+        if (!this.connected) return;
+
+        logger.debug(`[CodexMCP] Disconnecting; child pid=${this.transport?.pid ?? 'none'}`);
+        await this.closeTransport();
         // Preserve session/conversation identifiers for potential reconnection / recovery flows.
         // Only forceCloseSession() should clear them.
         logger.debug(`[CodexMCP] Disconnected; session ${this.sessionId ?? 'none'} preserved`);
+    }
+
+    async forceCloseSession(): Promise<void> {
+        if (!this.connected) return;
+
+        logger.debug(`[CodexMCP] Force closing session; child pid=${this.transport?.pid ?? 'none'}`);
+        await this.closeTransport();
+        // Clear session/conversation identifiers - this is the key difference from disconnect()
+        const clearedSessionId = this.sessionId;
+        this.sessionId = null;
+        this.conversationId = null;
+        logger.debug(`[CodexMCP] Session force-closed; cleared session ${clearedSessionId ?? 'none'}`);
     }
 }

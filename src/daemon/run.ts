@@ -139,7 +139,7 @@ async function ensureGenomeHubAccess(): Promise<number> {
       '-o', 'StrictHostKeyChecking=accept-new',
       '-L', `${localPort}:localhost:${localPort}`,
       sshHost,
-    ], { stdio: 'ignore', detached: true });
+    ], { stdio: 'ignore', detached: true, windowsHide: true });
 
     tunnel.on('error', (err) => {
       logger.debug(`[GENOME HUB] SSH tunnel spawn error: ${err.message}`);

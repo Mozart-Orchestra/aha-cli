@@ -16,6 +16,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { projectPath } from '@/projectPath'
 import packageJson from '../../package.json'
+import { isEnabledEnvValue } from '@/utils/envFlag'
 
 /**
  * Get relevant environment information for debugging
@@ -24,6 +25,7 @@ export function getEnvironmentInfo(): Record<string, any> {
     return {
         PWD: process.env.PWD,
         AHA_HOME_DIR: process.env.AHA_HOME_DIR,
+        AHA_CONFIG_FILE: process.env.AHA_CONFIG_FILE,
         AHA_SERVER_URL: process.env.AHA_SERVER_URL,
         AHA_PROJECT_ROOT: process.env.AHA_PROJECT_ROOT,
         DANGEROUSLY_LOG_TO_SERVER_FOR_AI_AUTO_DEBUGGING: process.env.DANGEROUSLY_LOG_TO_SERVER_FOR_AI_AUTO_DEBUGGING,
@@ -114,7 +116,7 @@ export async function runDoctorCommand(filter?: 'all' | 'daemon'): Promise<void>
         console.log(`AHA_HOME_DIR: ${env.AHA_HOME_DIR ? chalk.green(env.AHA_HOME_DIR) : chalk.gray('not set')}`);
         console.log(`AHA_CONFIG_FILE: ${env.AHA_CONFIG_FILE ? chalk.green(env.AHA_CONFIG_FILE) : chalk.gray('not set')}`);
         console.log(`AHA_SERVER_URL: ${env.AHA_SERVER_URL ? chalk.green(env.AHA_SERVER_URL) : chalk.gray('not set')}`);
-        console.log(`DANGEROUSLY_LOG_TO_SERVER: ${env.DANGEROUSLY_LOG_TO_SERVER_FOR_AI_AUTO_DEBUGGING ? chalk.yellow('ENABLED') : chalk.gray('not set')}`);
+        console.log(`DANGEROUSLY_LOG_TO_SERVER: ${isEnabledEnvValue(env.DANGEROUSLY_LOG_TO_SERVER_FOR_AI_AUTO_DEBUGGING) ? chalk.yellow('ENABLED') : chalk.gray('disabled')}`);
         console.log(`DEBUG: ${env.DEBUG ? chalk.green(env.DEBUG) : chalk.gray('not set')}`);
         console.log(`NODE_ENV: ${env.NODE_ENV ? chalk.green(env.NODE_ENV) : chalk.gray('not set')}`);
 

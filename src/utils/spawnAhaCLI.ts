@@ -43,7 +43,7 @@
  * Since we know exactly what needs to happen (run `dist/index.mjs` with specific
  * Node.js flags), we can bypass all the wrapper layers and do it directly:
  *
- * `spawn('node', ['--no-warnings', '--no-deprecation', 'dist/index.mjs', ...args])`
+ * `spawn(process.execPath, ['--no-warnings', '--no-deprecation', 'dist/index.mjs', ...args])`
  *
  * This works on all platforms and achieves the same result without any of the
  * middleman steps that were providing workarounds for Windows vs Linux differences.
@@ -112,5 +112,11 @@ export function spawnAhaCLI(args: string[], options: SpawnOptions = {}): ChildPr
     throw new Error(errorMessage);
   }
 
-  return spawn('node', nodeArgs, options);
+  return spawn(process.execPath, nodeArgs, {
+    // On Windows, detached: true creates a new console window that steals focus.
+    // windowsHide: true prevents this by passing CREATE_NO_WINDOW to CreateProcess.
+    // Harmless no-op on macOS/Linux.
+    windowsHide: true,
+    ...options,
+  });
 }

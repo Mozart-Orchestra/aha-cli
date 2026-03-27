@@ -1134,10 +1134,8 @@ export async function runCodex(opts: {
             messageBuffer.addMessage('Starting task...', 'status');
         } else if (msg.type === 'task_complete') {
             messageBuffer.addMessage('Task completed', 'status');
-            sendReady();
         } else if (msg.type === 'turn_aborted') {
             messageBuffer.addMessage('Turn aborted', 'status');
-            sendReady();
         }
 
         if (msg.type === 'task_started') {
@@ -1716,6 +1714,8 @@ Always reflect progress on the board and call these tools whenever you start or 
                 diffProcessor.reset();
                 thinking = false;
                 session.keepAlive(thinking, 'remote');
+                // Mirror runClaude: only mark ready after the turn has fully settled
+                // and there is no queued follow-up work.
                 emitReadyIfIdle({
                     pending,
                     queueSize: () => messageQueue.size(),

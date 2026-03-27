@@ -11,6 +11,7 @@ import { configuration } from '@/configuration'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, basename } from 'node:path'
 import { readDaemonState } from '@/persistence'
+import { isEnabledEnvValue } from '@/utils/envFlag'
 
 /**
  * Consistent date/time formatting functions
@@ -51,7 +52,7 @@ class Logger {
     public readonly logFilePath = getSessionLogPath()
   ) {
     // Remote logging enabled only when explicitly set with server URL
-    if (process.env.DANGEROUSLY_LOG_TO_SERVER_FOR_AI_AUTO_DEBUGGING
+    if (isEnabledEnvValue(process.env.DANGEROUSLY_LOG_TO_SERVER_FOR_AI_AUTO_DEBUGGING)
       && process.env.AHA_SERVER_URL) {
       this.dangerouslyUnencryptedServerLoggingUrl = process.env.AHA_SERVER_URL
       console.log(chalk.yellow('[REMOTE LOGGING] Sending logs to server for AI debugging'))

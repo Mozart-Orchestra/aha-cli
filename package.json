@@ -19,7 +19,9 @@
     "kanban-v3": "./bin/aha.mjs",
     "kanban-v3-mcp": "./bin/aha-mcp.mjs",
     "aha-v5": "./bin/aha.mjs",
-    "aha-v5-mcp": "./bin/aha-mcp.mjs"
+    "aha-v5-mcp": "./bin/aha-mcp.mjs",
+    "aha-v6": "./bin/aha.mjs",
+    "aha-v6-mcp": "./bin/aha-mcp.mjs"
   },
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
@@ -80,8 +82,10 @@
     "build:strict": "yarn typecheck && yarn build",
     "test": "yarn build && tsx --env-file .env.integration-test node_modules/.bin/vitest run",
     "start": "yarn build && ./bin/aha.mjs",
+    "start:docker-local": "yarn build && node --env-file=.env.docker-local ./bin/aha.mjs",
     "dev": "tsx src/index.ts",
     "dev:local-server": "yarn build && tsx --env-file .env.dev-local-server src/index.ts",
+    "dev:docker-local": "yarn build && tsx --env-file .env.docker-local src/index.ts",
     "dev:integration-test-env": "yarn build && tsx --env-file .env.integration-test src/index.ts",
     "prepublishOnly": "yarn build && yarn test",
     "release": "release-it",

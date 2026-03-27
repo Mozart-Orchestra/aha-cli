@@ -4,6 +4,11 @@ import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { join, dirname } from 'path';
 import { existsSync } from 'fs';
+import {
+  detectBinaryName,
+  detectEnvFile,
+  resolveChildEnv,
+} from './wrapperEnv.mjs';
 
 // Minimum supported Node version
 const MIN_NODE_MAJOR = 20;
@@ -31,16 +36,41 @@ if (!hasNoWarnings || !hasNoDeprecation) {
     process.exit(1);
   }
 
-  // Execute the actual CLI directly with the correct flags
+  // Auto-detect env file and local overrides
+  let envFile = null;
+  let env = process.env;
+
   try {
-    execFileSync(process.execPath, [
-      '--no-warnings',
-      '--no-deprecation',
-      entrypoint,
-      ...process.argv.slice(2)
-    ], {
+    const binaryName = detectBinaryName(process.argv[1] || process.execPath);
+    envFile = detectEnvFile({
+      binaryName,
+      projectRoot,
+    });
+    env = resolveChildEnv({
+      currentEnv: process.env,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`aha-v3: ${message}`);
+    process.exit(1);
+  }
+
+  // Execute the actual CLI directly with the correct flags
+  const nodeArgs = [
+    '--no-warnings',
+    '--no-deprecation'
+  ];
+
+  if (envFile) {
+    nodeArgs.push('--env-file', envFile);
+  }
+
+  nodeArgs.push(entrypoint, ...process.argv.slice(2));
+
+  try {
+    execFileSync(process.execPath, nodeArgs, {
       stdio: 'inherit',
-      env: process.env
+      env: env
     });
   } catch (error) {
     // execFileSync throws if the process exits with non-zero
