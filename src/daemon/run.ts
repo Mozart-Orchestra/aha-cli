@@ -68,6 +68,7 @@ import {
 
 import { runHeartbeatCycle } from './heartbeat';
 import { runSupervisorCycle, collectLiveMainlineSessionIdsByTeam } from './supervisorScheduler';
+import { checkHelpAutoSpawn, createHelpAutoSpawnState } from './helpAutoSpawn';
 import { shouldUsePidHeartbeat } from './heartbeatPolicy';
 
 // Prepare initial metadata — use configuration.currentCliVersion (reads from disk)
@@ -623,6 +624,7 @@ export async function startDaemon(): Promise<void> {
 
     let heartbeatRunning = false;
     let heartbeatCount = 0;
+    const helpAutoSpawnState = createHelpAutoSpawnState();
 
     // ── Heartbeat interval ─────────────────────────────────────────────────────
     // Every heartbeatIntervalMs (default 60s):
