@@ -25,3 +25,4 @@
 - 旧 alias (`aha-v3` / `aha-v7`) 不被破坏
 - `aha-v9-mcp` 继续保持 fail-fast：缺 URL 时直接报错，不静默 fallback
 - `aha-cli` 常驻容器若缺 `/home/node/.aha-v9/access.key`，应直接退出并提示补 credentials；交互 smoke 用 `docker compose run --rm --no-deps`
+- 若要让 `aha-cli` 也随 compose 常驻启动，先注入 `AHA_CREDENTIALS_JSON_B64` 或预热 `/home/node/.aha-v9/access.key`
