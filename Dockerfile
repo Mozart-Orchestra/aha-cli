@@ -17,7 +17,7 @@ RUN apk add --no-cache bash git openssh-client ffmpeg dumb-init
 WORKDIR /app
 
 ENV NODE_ENV=production \
-    AHA_HOME_DIR=/home/node/.aha-v3 \
+    AHA_HOME_DIR=/home/node/.aha-v9 \
     AHA_DISABLE_CAFFEINATE=true
 
 COPY package.json yarn.lock ./
