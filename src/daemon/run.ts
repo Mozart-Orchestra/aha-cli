@@ -43,7 +43,7 @@ import { authGetToken } from '@/api/auth';
 import { startCaffeinate, stopCaffeinate } from '@/utils/caffeinate';
 import axios from 'axios';
 import { getEnvironmentInfo } from '@/ui/doctor';
-import { writeDaemonState, DaemonLocallyPersistedState, acquireDaemonLock, releaseDaemonLock, readSettings } from '@/persistence';
+import { writeDaemonState, DaemonLocallyPersistedState, acquireDaemonLock, releaseDaemonLock, readSettings, readDaemonState } from '@/persistence';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { spawn } from 'child_process';
@@ -242,20 +242,27 @@ export async function startDaemon(): Promise<void> {
   logger.debug('[DAEMON RUN] Starting daemon process...');
   logger.debugLargeJson('[DAEMON RUN] Environment', getEnvironmentInfo());
 
-  // Check if already running
-  // Check if running daemon version matches current CLI version
+  // Check if already running with matching version
   const runningDaemonVersionMatches = await isDaemonRunningCurrentlyInstalledAhaVersion();
-  if (!runningDaemonVersionMatches) {
-    logger.debug('[DAEMON RUN] Daemon version mismatch detected, restarting daemon with current CLI version');
-    await stopDaemon();
-  } else {
+  if (runningDaemonVersionMatches) {
     logger.debug('[DAEMON RUN] Daemon version matches, keeping existing daemon');
     console.log('Daemon already running with matching version');
     process.exit(0);
   }
 
-  // Acquire exclusive lock (proves daemon is running)
-  const daemonLockHandle = await acquireDaemonLock(5, 200);
+  // Either no daemon or version mismatch — stop old daemon if one exists
+  const existingState = await readDaemonState();
+  if (existingState) {
+    logger.debug('[DAEMON RUN] Daemon version mismatch detected, stopping old daemon');
+    await stopDaemon();
+  } else {
+    logger.debug('[DAEMON RUN] No existing daemon found, starting fresh');
+  }
+
+  // Acquire exclusive lock (proves daemon is running).
+  // Retries up to 15 times (capped at 1s delay) to handle the case where
+  // another daemon instance is still initializing.
+  const daemonLockHandle = await acquireDaemonLock();
   if (!daemonLockHandle) {
     logger.debug('[DAEMON RUN] Daemon lock file already held, another daemon is running');
     process.exit(0);

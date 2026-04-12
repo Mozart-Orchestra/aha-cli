@@ -375,7 +375,7 @@ export async function clearDaemonState(reason?: string): Promise<void> {
  * Returns the file handle to hold for the daemon's lifetime, or null if locked.
  */
 export async function acquireDaemonLock(
-  maxAttempts: number = 5,
+  maxAttempts: number = 15,
   delayIncrementMs: number = 200
 ): Promise<FileHandle | null> {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -395,22 +395,32 @@ export async function acquireDaemonLock(
           const lockPid = readFileSync(configuration.daemonLockFile, 'utf-8').trim();
           if (lockPid && !isNaN(Number(lockPid))) {
             try {
-              process.kill(Number(lockPid), 0); // Check if process exists
+              process.kill(Number(lockPid), 0); // Check if process exists (signal 0 = no-op probe)
+              // Lock holder is alive — do NOT kill it; just wait and retry.
+              // Previous versions incorrectly sent SIGTERM here causing a race
+              // where rapid daemon spawns would kill each other before init completed.
             } catch {
               // Process doesn't exist, remove stale lock
               unlinkSync(configuration.daemonLockFile);
               continue; // Retry acquisition
             }
+          } else {
+            // Lock file empty or contains non-numeric data — remove it
+            unlinkSync(configuration.daemonLockFile);
+            continue;
           }
         } catch {
-          // Can't read lock file, might be corrupted
+          // Can't read lock file, might be corrupted — try removing
+          try { unlinkSync(configuration.daemonLockFile); } catch { /* ignore */ }
+          continue;
         }
       }
 
       if (attempt === maxAttempts) {
         return null;
       }
-      const delayMs = attempt * delayIncrementMs;
+      // Cap delay at 1s to avoid unnecessarily long waits
+      const delayMs = Math.min(attempt * delayIncrementMs, 1000);
       await new Promise(resolve => setTimeout(resolve, delayMs));
     }
   }

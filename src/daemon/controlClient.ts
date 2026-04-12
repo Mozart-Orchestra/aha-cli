@@ -211,7 +211,10 @@ export async function startDaemonDetached(): Promise<boolean> {
   });
   child.unref();
 
-  for (let i = 0; i < 50; i++) {
+  // Poll up to 15s for daemon state file. Daemon init includes a genome-hub
+  // reachability check (up to 3s for SSH tunnel) and machine registration,
+  // so 5s was too tight and caused spurious "Failed to start daemon" errors.
+  for (let i = 0; i < 150; i++) {
     if (await checkIfDaemonRunningAndCleanupStaleState()) {
       return true;
     }

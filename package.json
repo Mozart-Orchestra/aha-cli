@@ -1,6 +1,6 @@
 {
   "name": "cc-aha-cli-v3",
-  "version": "2.0.16",
+  "version": "2.0.17",
   "description": "Mobile and Web client for Claude Code and Codex",
   "author": "Kirill Dubovitskiy",
   "license": "MIT",
@@ -135,6 +135,7 @@
     "dotenv": "^16.6.1",
     "eslint": "^9",
     "eslint-config-prettier": "^10",
+    "javascript-obfuscator": "^5.4.1",
     "pkgroll": "^2.14.2",
     "release-it": "^19.0.4",
     "shx": "^0.3.3",
