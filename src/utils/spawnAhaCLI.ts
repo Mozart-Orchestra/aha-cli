@@ -67,8 +67,15 @@ import { existsSync } from 'node:fs';
  * @returns ChildProcess instance
  */
 export function spawnAhaCLI(args: string[], options: SpawnOptions = {}): ChildProcess {
+  // Prefer the entrypoint that the CURRENT process was started with (process.argv[1]).
+  // This guarantees the daemon uses the exact same package the CLI resolved to,
+  // avoiding version splits when multiple node_modules trees contain aha-agi
+  // (e.g. ~/node_modules/aha-agi vs ./node_modules/aha-agi).
+  const currentEntrypoint = process.argv[1];
   const projectRoot = projectPath();
-  const entrypoint = join(projectRoot, 'dist', 'index.mjs');
+  const entrypoint = (currentEntrypoint && existsSync(currentEntrypoint))
+    ? currentEntrypoint
+    : join(projectRoot, 'dist', 'index.mjs');
   const sourceEntrypoint = join(projectRoot, 'src', 'index.ts');
   const tsxEntrypoint = join(projectRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
   const allowSourceFallback = process.env.AHA_ALLOW_SOURCE_FALLBACK === '1';
@@ -85,7 +92,7 @@ export function spawnAhaCLI(args: string[], options: SpawnOptions = {}): ChildPr
   // for when "aha" was started and don't care about the underlying node process
   // details and flags we use to achieve the same result.
   const fullCommand = `aha ${args.join(' ')}`;
-  logger.debug(`[SPAWN AHA CLI] Spawning: ${fullCommand} in ${directory}`);
+  logger.debug(`[SPAWN AHA CLI] Spawning: ${fullCommand} in ${directory} (entrypoint: ${entrypoint})`);
 
   let nodeArgs: string[];
   if (existsSync(entrypoint)) {
