@@ -3,7 +3,7 @@
   "version": "2.0.17",
   "description": "Mobile and Web client for Claude Code and Codex",
   "author": "Kirill Dubovitskiy",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "type": "module",
   "homepage": "https://github.com/Shiyao-Huang/aha",
   "bugs": "https://github.com/Shiyao-Huang/aha/issues/new/choose",
@@ -12,16 +12,8 @@
     "url": "git+https://github.com/Shiyao-Huang/aha.git"
   },
   "bin": {
-    "aha-v3": "./bin/aha.mjs",
-    "aha-v3-mcp": "./bin/aha-mcp.mjs",
-    "aha-v4": "./bin/aha.mjs",
-    "aha-v4-mcp": "./bin/aha-mcp.mjs",
-    "kanban-v3": "./bin/aha.mjs",
-    "kanban-v3-mcp": "./bin/aha-mcp.mjs",
-    "aha-v5": "./bin/aha.mjs",
-    "aha-v5-mcp": "./bin/aha-mcp.mjs",
-    "aha-v6": "./bin/aha.mjs",
-    "aha-v6-mcp": "./bin/aha-mcp.mjs"
+    "aha": "bin/aha.js",
+    "aha-mcp": "bin/aha-mcp.js"
   },
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
