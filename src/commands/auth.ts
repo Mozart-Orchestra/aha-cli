@@ -11,6 +11,9 @@ import os from 'node:os';
 import { reconnectWithStoredCredentials } from '@/auth/reconnect';
 import { parseBackupKeyToSecret } from '@/utils/backupKey';
 import { authGetToken } from '@/api/auth';
+import axios from 'axios';
+import tweetnacl from 'tweetnacl';
+import { encodeBase64 } from '@/api/encryption';
 
 function decodeTokenSubject(token: string): { accountId?: string; sessionId?: string } {
   try {
@@ -101,6 +104,50 @@ ${chalk.bold('Recommended flows:')}
 `);
 }
 
+async function handleJoinTicket(code: string): Promise<void> {
+  console.log(chalk.yellow('Joining existing account from link ticket...'));
+  try {
+    // Generate a new keypair for this device
+    const keyPair = tweetnacl.box.keyPair();
+    const secret = keyPair.secretKey;
+    const publicKey = encodeBase64(keyPair.publicKey);
+
+    // Call the join endpoint
+    const response = await axios.post(`${configuration.serverUrl}/v1/auth/account/join`, {
+      ticket: code,
+      publicKey,
+    });
+
+    if (!response.data.success || !response.data.token) {
+      throw new Error('Join failed: server did not return a token');
+    }
+
+    await clearMachineId();
+    await writeCredentialsLegacy({ secret, token: response.data.token });
+    const { accountId } = decodeTokenSubject(response.data.token);
+    console.log(chalk.green('✓ Joined account successfully'));
+    if (accountId) {
+      console.log(chalk.gray(`  Account ID: ${accountId}`));
+    }
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 404) {
+      console.error(chalk.red('Join code is invalid or expired'));
+    } else {
+      console.error(chalk.red('Join failed:'), error instanceof Error ? error.message : 'Unknown error');
+    }
+    process.exit(1);
+  }
+
+  try { await stopDaemon(); } catch { /* ignore */ }
+  try {
+    const daemonResult = await ensureDaemonRunning();
+    console.log(chalk.gray(`  Daemon: ${daemonResult === 'started' ? 'started in background' : 'already running'}`));
+  } catch (error) {
+    console.log(chalk.yellow(`⚠️  Daemon start failed (non-fatal): ${error instanceof Error ? error.message : 'Unknown'}`));
+    console.log(chalk.gray('  Run "aha daemon start" to start manually'));
+  }
+}
+
 async function handleAuthRestore(args: string[]): Promise<void> {
   const restoreCode = readRestoreCodeArg(args);
   if (!restoreCode) {
@@ -182,8 +229,13 @@ async function handleAuthLogin(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  // ── Restore with --code: direct key-based restore, no browser needed ──
+  // ── --code: short alphanumeric = join ticket, long = backup key ──
   if (restoreCode) {
+    const isJoinTicket = /^[A-Z0-9]{4,10}$/i.test(restoreCode.trim());
+    if (isJoinTicket) {
+      await handleJoinTicket(restoreCode.trim().toUpperCase());
+      return;
+    }
     await handleAuthRestore(['--code', restoreCode]);
     return;
   }
