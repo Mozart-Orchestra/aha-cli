@@ -1,7 +1,5 @@
-import { configuration } from '@/configuration'
 import { DEFAULT_GENOME_HUB_URL } from '@/configurationResolver'
 import type { DiffChange } from '@/api/types/genome'
-import { normalizeFeedbackProxyBaseUrl } from './genomeFeedbackSync'
 import { resolveGenomeHubWriteTokenSync } from '@/utils/genomeHubAuth'
 
 type FetchResponseLike = {
@@ -26,7 +24,7 @@ export type GenomePromotePayload = {
     minAvgScore: number;
 }
 
-function buildPromoteHeaders(hubPublishKey?: string): Record<string, string> {
+function buildHubHeaders(hubPublishKey?: string): Record<string, string> {
     const hubAuthToken = resolveGenomeHubWriteTokenSync(hubPublishKey)
     return {
         'Content-Type': 'application/json',
@@ -34,48 +32,40 @@ function buildPromoteHeaders(hubPublishKey?: string): Record<string, string> {
     }
 }
 
-function buildServerProxyHeaders(authToken?: string): Record<string, string> {
-    return {
-        'Content-Type': 'application/json',
-        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+function diagnoseFailure(operation: string, hubUrl: string, status: number, body: string, error?: unknown): string {
+    const lines = [
+        `genome-hub ${operation} failed.`,
+        `  Hub URL: ${hubUrl}`,
+        `  Status: ${status}`,
+    ];
+    if (status === 401 || status === 403) {
+        lines.push(
+            `  Diagnosis: Auth rejected. Check HUB_PUBLISH_KEY.`,
+            `  Action: Run \`docker exec happyhere-genome-hub-1 printenv HUB_PUBLISH_KEY\` and compare with local GENOME_HUB_PUBLISH_KEY.`,
+        );
+    } else if (status === 404) {
+        lines.push(
+            `  Diagnosis: Endpoint not found. Hub may be outdated or the entity/genome does not exist.`,
+            `  Action: Verify the genome exists via GET ${hubUrl}/genomes and check hub version.`,
+        );
+    } else if (status >= 500) {
+        lines.push(
+            `  Diagnosis: Hub internal error. Check hub server logs.`,
+        );
+    } else if (status === 0 && error) {
+        lines.push(
+            `  Diagnosis: Network unreachable or timeout.`,
+            `  Action: Verify GENOME_HUB_URL (${hubUrl}) is reachable: \`curl ${hubUrl}/genomes\``,
+            `  Error: ${String(error)}`,
+        );
     }
+    if (body) {
+        lines.push(`  Response: ${body.slice(0, 500)}`);
+    }
+    return lines.join('\n');
 }
 
-async function postPromote(
-    fetchImpl: FetchLike,
-    hubUrl: string,
-    hubPublishKey: string | undefined,
-    target: GenomePromoteTarget,
-    payload: GenomePromotePayload,
-): Promise<FetchResponseLike> {
-    return fetchImpl(
-        `${hubUrl}/genomes/${encodeURIComponent(target.namespace)}/${encodeURIComponent(target.name)}/promote`,
-        {
-            method: 'POST',
-            headers: buildPromoteHeaders(hubPublishKey),
-            body: JSON.stringify(payload),
-            signal: AbortSignal.timeout(15_000),
-        },
-    )
-}
-
-async function postPromoteViaServerProxy(
-    fetchImpl: FetchLike,
-    serverUrl: string,
-    authToken: string | undefined,
-    target: GenomePromoteTarget,
-    payload: GenomePromotePayload,
-): Promise<FetchResponseLike> {
-    return fetchImpl(
-        `${serverUrl}/v1/genomes/${encodeURIComponent(target.namespace)}/${encodeURIComponent(target.name)}/promote`,
-        {
-            method: 'POST',
-            headers: buildServerProxyHeaders(authToken),
-            body: JSON.stringify(payload),
-            signal: AbortSignal.timeout(15_000),
-        },
-    )
-}
+// ── Types ─────────────────────────────────────────────────────────────
 
 export type GenomeCreateHubPayload = {
     namespace: string;
@@ -87,130 +77,6 @@ export type GenomeCreateHubPayload = {
     category?: string;
     tags?: string;
 }
-
-async function postCreateHub(
-    fetchImpl: FetchLike,
-    hubUrl: string,
-    hubPublishKey: string | undefined,
-    payload: GenomeCreateHubPayload,
-): Promise<FetchResponseLike> {
-    return fetchImpl(
-        `${hubUrl}/genomes`,
-        {
-            method: 'POST',
-            headers: buildPromoteHeaders(hubPublishKey),
-            body: JSON.stringify(payload),
-            signal: AbortSignal.timeout(10_000),
-        },
-    )
-}
-
-async function postCreateHubViaServerProxy(
-    fetchImpl: FetchLike,
-    serverUrl: string,
-    authToken: string | undefined,
-    payload: GenomeCreateHubPayload,
-): Promise<FetchResponseLike> {
-    return fetchImpl(
-        `${serverUrl}/v1/genomes/hub-create`,
-        {
-            method: 'POST',
-            headers: buildServerProxyHeaders(authToken),
-            body: JSON.stringify(payload),
-            signal: AbortSignal.timeout(10_000),
-        },
-    )
-}
-
-/**
- * Create a new genome version in genome-hub, with automatic fallback to the
- * happy-server proxy (`POST /v1/genomes/hub-create`) when direct hub access
- * returns 401/403 or fails entirely.  Used by `mutate_genome` MCP tool.
- */
-export async function createGenomeViaMarketplace(args: {
-    payload: GenomeCreateHubPayload;
-    hubUrl?: string;
-    hubPublishKey?: string;
-    serverUrl?: string;
-    authToken?: string;
-    fetchImpl?: FetchLike;
-}): Promise<{
-    ok: boolean;
-    status: number;
-    body: string;
-    transport: 'direct-hub' | 'server-proxy';
-}> {
-    const fetchImpl = args.fetchImpl ?? (fetch as FetchLike)
-    const hubUrl = (args.hubUrl ?? DEFAULT_GENOME_HUB_URL).replace(/\/$/, '')
-    const rawServerUrl = args.serverUrl ?? configuration.serverUrl
-    const serverUrl = normalizeFeedbackProxyBaseUrl(rawServerUrl)
-
-    let response: FetchResponseLike | null = null
-    let body = ''
-    let directError: unknown = null
-
-    try {
-        response = await postCreateHub(fetchImpl, hubUrl, args.hubPublishKey, args.payload)
-        body = await response.text().catch(() => '')
-    } catch (error) {
-        directError = error
-    }
-
-    const shouldTryServerProxy = Boolean(args.authToken) && (
-        directError
-        || !response
-        || response.status === 401
-        || response.status === 403
-        || response.status === 404
-        || response.status >= 500
-    )
-
-    if (shouldTryServerProxy) {
-        try {
-            const proxiedResponse = await postCreateHubViaServerProxy(
-                fetchImpl,
-                serverUrl,
-                args.authToken,
-                args.payload,
-            )
-            const proxiedBody = await proxiedResponse.text().catch(() => '')
-
-            return {
-                ok: proxiedResponse.ok,
-                status: proxiedResponse.status,
-                body: proxiedBody,
-                transport: 'server-proxy',
-            }
-        } catch (proxyError) {
-            if (!response) {
-                return {
-                    ok: false,
-                    status: 0,
-                    body: String(proxyError || directError || 'Unknown network error'),
-                    transport: 'server-proxy',
-                }
-            }
-        }
-    }
-
-    if (!response) {
-        return {
-            ok: false,
-            status: 0,
-            body: String(directError || 'Unknown network error'),
-            transport: 'direct-hub',
-        }
-    }
-
-    return {
-        ok: response.ok,
-        status: response.status,
-        body,
-        transport: 'direct-hub',
-    }
-}
-
-// ── Diff submit helpers (for evolve_genome proxy fallback) ──────────
 
 type DiffSubmitPayload = {
     description: string;
@@ -236,66 +102,64 @@ type PackageDiffSubmitPayload = {
     authorSession?: string;
 };
 
-async function postDiffDirect(
+type HubResult = {
+    ok: boolean;
+    status: number;
+    body: string;
+    transport: 'direct-hub';
+};
+
+// ── Direct hub calls (no fallback, hard fail) ─────────────────────────
+
+async function hubPost(
     fetchImpl: FetchLike,
-    hubUrl: string,
+    url: string,
     hubPublishKey: string | undefined,
-    namespace: string,
-    name: string,
-    payload: DiffSubmitPayload,
-): Promise<FetchResponseLike> {
-    return fetchImpl(
-        `${hubUrl}/genomes/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/diff`,
-        {
-            method: 'POST',
-            headers: buildPromoteHeaders(hubPublishKey),
-            body: JSON.stringify(payload),
-            signal: AbortSignal.timeout(10_000),
-        },
-    );
+    payload: unknown,
+    timeoutMs = 10_000,
+): Promise<HubResult> {
+    const response = await fetchImpl(url, {
+        method: 'POST',
+        headers: buildHubHeaders(hubPublishKey),
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(timeoutMs),
+    });
+    const body = await response.text().catch(() => '');
+    return { ok: response.ok, status: response.status, body, transport: 'direct-hub' };
 }
 
-async function postDiffViaServerProxy(
-    fetchImpl: FetchLike,
-    serverUrl: string,
-    authToken: string | undefined,
-    namespace: string,
-    name: string,
-    payload: DiffSubmitPayload,
-): Promise<FetchResponseLike> {
-    return fetchImpl(
-        `${serverUrl}/v1/genomes/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/diff`,
-        {
-            method: 'POST',
-            headers: buildServerProxyHeaders(authToken),
-            body: JSON.stringify(payload),
-            signal: AbortSignal.timeout(10_000),
-        },
-    );
-}
+// ── Public API ────────────────────────────────────────────────────────
 
-async function postPackageDiffDirect(
-    fetchImpl: FetchLike,
-    hubUrl: string,
-    hubPublishKey: string | undefined,
-    entityId: string,
-    payload: PackageDiffSubmitPayload,
-): Promise<FetchResponseLike> {
-    return fetchImpl(
-        `${hubUrl}/entities/id/${encodeURIComponent(entityId)}/package-diffs`,
-        {
-            method: 'POST',
-            headers: buildPromoteHeaders(hubPublishKey),
-            body: JSON.stringify(payload),
-            signal: AbortSignal.timeout(10_000),
-        },
-    );
+/**
+ * Create a new genome in genome-hub. Hard fails on any error.
+ */
+export async function createGenomeViaMarketplace(args: {
+    payload: GenomeCreateHubPayload;
+    hubUrl?: string;
+    hubPublishKey?: string;
+    fetchImpl?: FetchLike;
+}): Promise<HubResult> {
+    const fetchImpl = args.fetchImpl ?? (fetch as FetchLike);
+    const hubUrl = (args.hubUrl ?? DEFAULT_GENOME_HUB_URL).replace(/\/$/, '');
+
+    try {
+        const result = await hubPost(fetchImpl, `${hubUrl}/genomes`, args.hubPublishKey, args.payload);
+        if (!result.ok) {
+            result.body = diagnoseFailure('createGenome', hubUrl, result.status, result.body);
+        }
+        return result;
+    } catch (error) {
+        return {
+            ok: false,
+            status: 0,
+            body: diagnoseFailure('createGenome', hubUrl, 0, '', error),
+            transport: 'direct-hub',
+        };
+    }
 }
 
 /**
- * Submit a diff to genome-hub for evolve_genome, with automatic fallback
- * to the happy-server proxy (`POST /v1/genomes/:ns/:name/diff`) when direct
- * hub access returns 401/403 or fails entirely.
+ * Submit a diff to genome-hub (evolve_genome). Hard fails on any error.
  */
 export async function submitDiffViaMarketplace(args: {
     namespace: string;
@@ -303,256 +167,84 @@ export async function submitDiffViaMarketplace(args: {
     payload: DiffSubmitPayload;
     hubUrl?: string;
     hubPublishKey?: string;
-    serverUrl?: string;
-    authToken?: string;
     fetchImpl?: FetchLike;
-}): Promise<{
-    ok: boolean;
-    status: number;
-    body: string;
-    transport: 'direct-hub' | 'server-proxy';
-}> {
+}): Promise<HubResult> {
     const fetchImpl = args.fetchImpl ?? (fetch as FetchLike);
     const hubUrl = (args.hubUrl ?? DEFAULT_GENOME_HUB_URL).replace(/\/$/, '');
-    const rawServerUrl = args.serverUrl ?? configuration.serverUrl;
-    const serverUrl = normalizeFeedbackProxyBaseUrl(rawServerUrl);
-
-    let response: FetchResponseLike | null = null;
-    let body = '';
-    let directError: unknown = null;
+    const url = `${hubUrl}/genomes/${encodeURIComponent(args.namespace)}/${encodeURIComponent(args.name)}/diff`;
 
     try {
-        response = await postDiffDirect(fetchImpl, hubUrl, args.hubPublishKey, args.namespace, args.name, args.payload);
-        body = await response.text().catch(() => '');
-    } catch (error) {
-        directError = error;
-    }
-
-    const shouldTryServerProxy = Boolean(args.authToken) && (
-        directError
-        || !response
-        || response.status === 401
-        || response.status === 403
-        || response.status === 404
-        || response.status >= 500
-    );
-
-    if (shouldTryServerProxy) {
-        try {
-            const proxiedResponse = await postDiffViaServerProxy(
-                fetchImpl,
-                serverUrl,
-                args.authToken,
-                args.namespace,
-                args.name,
-                args.payload,
-            );
-            const proxiedBody = await proxiedResponse.text().catch(() => '');
-
-            return {
-                ok: proxiedResponse.ok,
-                status: proxiedResponse.status,
-                body: proxiedBody,
-                transport: 'server-proxy',
-            };
-        } catch (proxyError) {
-            if (!response) {
-                return {
-                    ok: false,
-                    status: 0,
-                    body: String(proxyError || directError || 'Unknown network error'),
-                    transport: 'server-proxy',
-                };
-            }
+        const result = await hubPost(fetchImpl, url, args.hubPublishKey, args.payload);
+        if (!result.ok) {
+            result.body = diagnoseFailure(`submitDiff(${args.namespace}/${args.name})`, hubUrl, result.status, result.body);
         }
-    }
-
-    if (!response) {
+        return result;
+    } catch (error) {
         return {
             ok: false,
             status: 0,
-            body: String(directError || 'Unknown network error'),
+            body: diagnoseFailure(`submitDiff(${args.namespace}/${args.name})`, hubUrl, 0, '', error),
             transport: 'direct-hub',
         };
     }
-
-    return {
-        ok: response.ok,
-        status: response.status,
-        body,
-        transport: 'direct-hub',
-    };
 }
 
+/**
+ * Submit a package diff to genome-hub (mutate_genome). Hard fails on any error.
+ */
 export async function submitPackageDiffViaMarketplace(args: {
     entityId: string;
     payload: PackageDiffSubmitPayload;
     hubUrl?: string;
     hubPublishKey?: string;
-    serverUrl?: string;
-    authToken?: string;
     fetchImpl?: FetchLike;
-}): Promise<{
-    ok: boolean;
-    status: number;
-    body: string;
-    transport: 'direct-hub' | 'server-proxy';
-}> {
+}): Promise<HubResult> {
     const fetchImpl = args.fetchImpl ?? (fetch as FetchLike);
     const hubUrl = (args.hubUrl ?? DEFAULT_GENOME_HUB_URL).replace(/\/$/, '');
-    const rawServerUrl = args.serverUrl ?? configuration.serverUrl;
-    const serverUrl = normalizeFeedbackProxyBaseUrl(rawServerUrl);
-
-    let response: FetchResponseLike | null = null;
-    let body = '';
-    let directError: unknown = null;
+    const url = `${hubUrl}/entities/id/${encodeURIComponent(args.entityId)}/package-diffs`;
 
     try {
-        response = await postPackageDiffDirect(fetchImpl, hubUrl, args.hubPublishKey, args.entityId, args.payload);
-        body = await response.text().catch(() => '');
-    } catch (error) {
-        directError = error;
-    }
-
-    // Fallback to server proxy when direct hub access fails
-    const shouldTryServerProxy = Boolean(args.authToken) && (
-        directError
-        || !response
-        || response.status === 401
-        || response.status === 403
-        || response.status === 404
-        || response.status >= 500
-    );
-
-    if (shouldTryServerProxy) {
-        try {
-            const proxiedResponse = await fetchImpl(
-                `${serverUrl}/v1/genomes/id/${encodeURIComponent(args.entityId)}/package-diffs`,
-                {
-                    method: 'POST',
-                    headers: buildServerProxyHeaders(args.authToken),
-                    body: JSON.stringify(args.payload),
-                    signal: AbortSignal.timeout(10_000),
-                },
-            );
-            const proxiedBody = await proxiedResponse.text().catch(() => '');
-
-            return {
-                ok: proxiedResponse.ok,
-                status: proxiedResponse.status,
-                body: proxiedBody,
-                transport: 'server-proxy',
-            };
-        } catch (proxyError) {
-            if (!response) {
-                return {
-                    ok: false,
-                    status: 0,
-                    body: String(proxyError || directError || 'Unknown network error'),
-                    transport: 'server-proxy',
-                };
-            }
+        const result = await hubPost(fetchImpl, url, args.hubPublishKey, args.payload);
+        if (!result.ok) {
+            result.body = diagnoseFailure(`submitPackageDiff(${args.entityId})`, hubUrl, result.status, result.body);
         }
-    }
-
-    if (!response) {
+        return result;
+    } catch (error) {
         return {
             ok: false,
             status: 0,
-            body: String(directError || 'Unknown network error'),
+            body: diagnoseFailure(`submitPackageDiff(${args.entityId})`, hubUrl, 0, '', error),
             transport: 'direct-hub',
         };
     }
-
-    return {
-        ok: response.ok,
-        status: response.status,
-        body,
-        transport: 'direct-hub',
-    };
 }
 
+/**
+ * Promote a genome in genome-hub. Hard fails on any error.
+ */
 export async function promoteGenomeViaMarketplace(args: {
     target: GenomePromoteTarget;
     payload: GenomePromotePayload;
     hubUrl?: string;
     hubPublishKey?: string;
-    serverUrl?: string;
-    authToken?: string;
     fetchImpl?: FetchLike;
-}): Promise<{
-    ok: boolean;
-    status: number;
-    body: string;
-    transport: 'direct-hub' | 'server-proxy';
-}> {
-    const fetchImpl = args.fetchImpl ?? (fetch as FetchLike)
-    const hubUrl = (args.hubUrl ?? DEFAULT_GENOME_HUB_URL).replace(/\/$/, '')
-    const rawServerUrl = args.serverUrl ?? configuration.serverUrl
-    const serverUrl = normalizeFeedbackProxyBaseUrl(rawServerUrl)
-
-    let response: FetchResponseLike | null = null
-    let body = ''
-    let directError: unknown = null
+}): Promise<HubResult> {
+    const fetchImpl = args.fetchImpl ?? (fetch as FetchLike);
+    const hubUrl = (args.hubUrl ?? DEFAULT_GENOME_HUB_URL).replace(/\/$/, '');
+    const url = `${hubUrl}/genomes/${encodeURIComponent(args.target.namespace)}/${encodeURIComponent(args.target.name)}/promote`;
 
     try {
-        response = await postPromote(fetchImpl, hubUrl, args.hubPublishKey, args.target, args.payload)
-        body = await response.text().catch(() => '')
-    } catch (error) {
-        directError = error
-    }
-
-    const shouldTryServerProxy = Boolean(args.authToken) && (
-        directError
-        || !response
-        || response.status === 401
-        || response.status === 403
-        || response.status === 404
-        || response.status >= 500
-    )
-
-    if (shouldTryServerProxy) {
-        try {
-            const proxiedResponse = await postPromoteViaServerProxy(
-                fetchImpl,
-                serverUrl,
-                args.authToken,
-                args.target,
-                args.payload,
-            )
-            const proxiedBody = await proxiedResponse.text().catch(() => '')
-
-            return {
-                ok: proxiedResponse.ok,
-                status: proxiedResponse.status,
-                body: proxiedBody,
-                transport: 'server-proxy',
-            }
-        } catch (proxyError) {
-            if (!response) {
-                return {
-                    ok: false,
-                    status: 0,
-                    body: String(proxyError || directError || 'Unknown network error'),
-                    transport: 'server-proxy',
-                }
-            }
+        const result = await hubPost(fetchImpl, url, args.hubPublishKey, args.payload, 15_000);
+        if (!result.ok) {
+            result.body = diagnoseFailure(`promote(${args.target.namespace}/${args.target.name})`, hubUrl, result.status, result.body);
         }
-    }
-
-    if (!response) {
+        return result;
+    } catch (error) {
         return {
             ok: false,
             status: 0,
-            body: String(directError || 'Unknown network error'),
+            body: diagnoseFailure(`promote(${args.target.namespace}/${args.target.name})`, hubUrl, 0, '', error),
             transport: 'direct-hub',
-        }
-    }
-
-    return {
-        ok: response.ok,
-        status: response.status,
-        body,
-        transport: 'direct-hub',
+        };
     }
 }
