@@ -1,3 +1,4 @@
+import { configuration } from '@/configuration'
 import { DEFAULT_GENOME_HUB_URL } from '@/configurationResolver'
 import type { DiffChange } from '@/api/types/genome'
 import { resolveGenomeHubWriteTokenSync } from '@/utils/genomeHubAuth'
@@ -22,47 +23,6 @@ export type GenomePromotePayload = {
     category?: string;
     isPublic: boolean;
     minAvgScore: number;
-}
-
-function buildHubHeaders(hubPublishKey?: string): Record<string, string> {
-    const hubAuthToken = resolveGenomeHubWriteTokenSync(hubPublishKey)
-    return {
-        'Content-Type': 'application/json',
-        ...(hubAuthToken ? { Authorization: `Bearer ${hubAuthToken}` } : {}),
-    }
-}
-
-function diagnoseFailure(operation: string, hubUrl: string, status: number, body: string, error?: unknown): string {
-    const lines = [
-        `genome-hub ${operation} failed.`,
-        `  Hub URL: ${hubUrl}`,
-        `  Status: ${status}`,
-    ];
-    if (status === 401 || status === 403) {
-        lines.push(
-            `  Diagnosis: Auth rejected. Check HUB_PUBLISH_KEY.`,
-            `  Action: Run \`docker exec happyhere-genome-hub-1 printenv HUB_PUBLISH_KEY\` and compare with local GENOME_HUB_PUBLISH_KEY.`,
-        );
-    } else if (status === 404) {
-        lines.push(
-            `  Diagnosis: Endpoint not found. Hub may be outdated or the entity/genome does not exist.`,
-            `  Action: Verify the genome exists via GET ${hubUrl}/genomes and check hub version.`,
-        );
-    } else if (status >= 500) {
-        lines.push(
-            `  Diagnosis: Hub internal error. Check hub server logs.`,
-        );
-    } else if (status === 0 && error) {
-        lines.push(
-            `  Diagnosis: Network unreachable or timeout.`,
-            `  Action: Verify GENOME_HUB_URL (${hubUrl}) is reachable: \`curl ${hubUrl}/genomes\``,
-            `  Error: ${String(error)}`,
-        );
-    }
-    if (body) {
-        lines.push(`  Response: ${body.slice(0, 500)}`);
-    }
-    return lines.join('\n');
 }
 
 // ── Types ─────────────────────────────────────────────────────────────
@@ -106,60 +66,177 @@ type HubResult = {
     ok: boolean;
     status: number;
     body: string;
-    transport: 'direct-hub';
+    transport: 'direct-hub' | 'server-proxy';
 };
 
-// ── Direct hub calls (no fallback, hard fail) ─────────────────────────
+// ── Auth: two explicit paths ──────────────────────────────────────────
+//
+// Path A: HUB_PUBLISH_KEY available → direct to genome-hub
+// Path B: No HUB_PUBLISH_KEY, but authToken → proxy through happy-server
+//
+// Never silent fallback. The caller decides the path based on what
+// credentials it has. If the chosen path fails, hard fail with diagnosis.
 
-async function hubPost(
+type WriteRoute =
+    | { kind: 'direct'; hubUrl: string; hubPublishKey: string }
+    | { kind: 'proxy'; serverUrl: string; authToken: string };
+
+function resolveWriteRoute(args: {
+    hubUrl?: string;
+    hubPublishKey?: string;
+    serverUrl?: string;
+    authToken?: string;
+}): WriteRoute {
+    const hubUrl = (args.hubUrl ?? DEFAULT_GENOME_HUB_URL).replace(/\/$/, '');
+    const hubPublishKey = resolveGenomeHubWriteTokenSync(args.hubPublishKey);
+
+    if (hubPublishKey) {
+        return { kind: 'direct', hubUrl, hubPublishKey };
+    }
+
+    const serverUrl = (args.serverUrl ?? configuration.serverUrl).replace(/\/$/, '');
+    const authToken = args.authToken;
+
+    if (authToken) {
+        return { kind: 'proxy', serverUrl, authToken };
+    }
+
+    // No credentials at all — will hard fail at request time with clear diagnosis
+    return { kind: 'direct', hubUrl, hubPublishKey: '' };
+}
+
+function buildHeaders(route: WriteRoute): Record<string, string> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (route.kind === 'direct' && route.hubPublishKey) {
+        headers.Authorization = `Bearer ${route.hubPublishKey}`;
+    } else if (route.kind === 'proxy' && route.authToken) {
+        headers.Authorization = `Bearer ${route.authToken}`;
+    }
+    return headers;
+}
+
+function diagnoseFailure(
+    operation: string,
+    route: WriteRoute,
+    status: number,
+    body: string,
+    error?: unknown,
+): string {
+    const target = route.kind === 'direct' ? route.hubUrl : route.serverUrl;
+    const lines = [
+        `genome-hub ${operation} failed via ${route.kind}.`,
+        `  Target: ${target}`,
+        `  Status: ${status}`,
+    ];
+    if (status === 401 || status === 403) {
+        if (route.kind === 'direct') {
+            lines.push(
+                `  Diagnosis: HUB_PUBLISH_KEY rejected by genome-hub.`,
+                `  Action: Run \`docker exec happyhere-genome-hub-1 printenv HUB_PUBLISH_KEY\` and compare.`,
+                `  Has key: ${route.hubPublishKey ? 'yes (' + route.hubPublishKey.slice(0, 8) + '...)' : 'NO — this is the bug'}`,
+            );
+        } else {
+            lines.push(
+                `  Diagnosis: Auth token rejected by happy-server proxy.`,
+                `  Action: Re-login or check auth token validity.`,
+            );
+        }
+    } else if (status === 404) {
+        lines.push(
+            `  Diagnosis: Endpoint not found. ${route.kind === 'proxy' ? 'Server may lack the proxy route.' : 'Hub may be outdated or entity missing.'}`,
+        );
+    } else if (status >= 500) {
+        lines.push(
+            `  Diagnosis: ${route.kind === 'direct' ? 'Hub' : 'Server'} internal error. Check logs.`,
+        );
+    } else if (status === 0 && error) {
+        lines.push(
+            `  Diagnosis: Network unreachable or timeout.`,
+            `  Action: Verify ${target} is reachable.`,
+            `  Error: ${String(error)}`,
+        );
+    }
+    if (!route.hubPublishKey && route.kind === 'direct') {
+        lines.push(
+            `  No HUB_PUBLISH_KEY found. Set HUB_PUBLISH_KEY env or login to provision credentials.`,
+        );
+    }
+    if (body) {
+        lines.push(`  Response: ${body.slice(0, 500)}`);
+    }
+    return lines.join('\n');
+}
+
+// ── Core request ──────────────────────────────────────────────────────
+
+async function hubWrite(
     fetchImpl: FetchLike,
-    url: string,
-    hubPublishKey: string | undefined,
+    route: WriteRoute,
+    path: string,
     payload: unknown,
+    operation: string,
     timeoutMs = 10_000,
 ): Promise<HubResult> {
-    const response = await fetchImpl(url, {
-        method: 'POST',
-        headers: buildHubHeaders(hubPublishKey),
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(timeoutMs),
-    });
-    const body = await response.text().catch(() => '');
-    return { ok: response.ok, status: response.status, body, transport: 'direct-hub' };
+    const baseUrl = route.kind === 'direct' ? route.hubUrl : route.serverUrl;
+    const prefix = route.kind === 'proxy' ? '/v1' : '';
+    const url = `${baseUrl}${prefix}${path}`;
+
+    try {
+        const response = await fetchImpl(url, {
+            method: 'POST',
+            headers: buildHeaders(route),
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(timeoutMs),
+        });
+        const body = await response.text().catch(() => '');
+
+        if (!response.ok) {
+            return {
+                ok: false,
+                status: response.status,
+                body: diagnoseFailure(operation, route, response.status, body),
+                transport: route.kind === 'direct' ? 'direct-hub' : 'server-proxy',
+            };
+        }
+
+        return {
+            ok: true,
+            status: response.status,
+            body,
+            transport: route.kind === 'direct' ? 'direct-hub' : 'server-proxy',
+        };
+    } catch (error) {
+        return {
+            ok: false,
+            status: 0,
+            body: diagnoseFailure(operation, route, 0, '', error),
+            transport: route.kind === 'direct' ? 'direct-hub' : 'server-proxy',
+        };
+    }
 }
 
 // ── Public API ────────────────────────────────────────────────────────
 
 /**
- * Create a new genome in genome-hub. Hard fails on any error.
+ * Create a new genome in genome-hub.
+ * Route A (direct) if HUB_PUBLISH_KEY available, Route B (proxy) if only authToken.
  */
 export async function createGenomeViaMarketplace(args: {
     payload: GenomeCreateHubPayload;
     hubUrl?: string;
     hubPublishKey?: string;
+    serverUrl?: string;
+    authToken?: string;
     fetchImpl?: FetchLike;
 }): Promise<HubResult> {
     const fetchImpl = args.fetchImpl ?? (fetch as FetchLike);
-    const hubUrl = (args.hubUrl ?? DEFAULT_GENOME_HUB_URL).replace(/\/$/, '');
-
-    try {
-        const result = await hubPost(fetchImpl, `${hubUrl}/genomes`, args.hubPublishKey, args.payload);
-        if (!result.ok) {
-            result.body = diagnoseFailure('createGenome', hubUrl, result.status, result.body);
-        }
-        return result;
-    } catch (error) {
-        return {
-            ok: false,
-            status: 0,
-            body: diagnoseFailure('createGenome', hubUrl, 0, '', error),
-            transport: 'direct-hub',
-        };
-    }
+    const route = resolveWriteRoute(args);
+    return hubWrite(fetchImpl, route, '/genomes', args.payload, 'createGenome');
 }
 
 /**
- * Submit a diff to genome-hub (evolve_genome). Hard fails on any error.
+ * Submit a diff to genome-hub (evolve_genome).
+ * Route A (direct) if HUB_PUBLISH_KEY available, Route B (proxy) if only authToken.
  */
 export async function submitDiffViaMarketplace(args: {
     namespace: string;
@@ -167,84 +244,50 @@ export async function submitDiffViaMarketplace(args: {
     payload: DiffSubmitPayload;
     hubUrl?: string;
     hubPublishKey?: string;
+    serverUrl?: string;
+    authToken?: string;
     fetchImpl?: FetchLike;
 }): Promise<HubResult> {
     const fetchImpl = args.fetchImpl ?? (fetch as FetchLike);
-    const hubUrl = (args.hubUrl ?? DEFAULT_GENOME_HUB_URL).replace(/\/$/, '');
-    const url = `${hubUrl}/genomes/${encodeURIComponent(args.namespace)}/${encodeURIComponent(args.name)}/diff`;
-
-    try {
-        const result = await hubPost(fetchImpl, url, args.hubPublishKey, args.payload);
-        if (!result.ok) {
-            result.body = diagnoseFailure(`submitDiff(${args.namespace}/${args.name})`, hubUrl, result.status, result.body);
-        }
-        return result;
-    } catch (error) {
-        return {
-            ok: false,
-            status: 0,
-            body: diagnoseFailure(`submitDiff(${args.namespace}/${args.name})`, hubUrl, 0, '', error),
-            transport: 'direct-hub',
-        };
-    }
+    const route = resolveWriteRoute(args);
+    const path = `/genomes/${encodeURIComponent(args.namespace)}/${encodeURIComponent(args.name)}/diff`;
+    return hubWrite(fetchImpl, route, path, args.payload, `submitDiff(${args.namespace}/${args.name})`);
 }
 
 /**
- * Submit a package diff to genome-hub (mutate_genome). Hard fails on any error.
+ * Submit a package diff to genome-hub (mutate_genome).
+ * Route A (direct) if HUB_PUBLISH_KEY available, Route B (proxy) if only authToken.
  */
 export async function submitPackageDiffViaMarketplace(args: {
     entityId: string;
     payload: PackageDiffSubmitPayload;
     hubUrl?: string;
     hubPublishKey?: string;
+    serverUrl?: string;
+    authToken?: string;
     fetchImpl?: FetchLike;
 }): Promise<HubResult> {
     const fetchImpl = args.fetchImpl ?? (fetch as FetchLike);
-    const hubUrl = (args.hubUrl ?? DEFAULT_GENOME_HUB_URL).replace(/\/$/, '');
-    const url = `${hubUrl}/entities/id/${encodeURIComponent(args.entityId)}/package-diffs`;
-
-    try {
-        const result = await hubPost(fetchImpl, url, args.hubPublishKey, args.payload);
-        if (!result.ok) {
-            result.body = diagnoseFailure(`submitPackageDiff(${args.entityId})`, hubUrl, result.status, result.body);
-        }
-        return result;
-    } catch (error) {
-        return {
-            ok: false,
-            status: 0,
-            body: diagnoseFailure(`submitPackageDiff(${args.entityId})`, hubUrl, 0, '', error),
-            transport: 'direct-hub',
-        };
-    }
+    const route = resolveWriteRoute(args);
+    const path = `/entities/id/${encodeURIComponent(args.entityId)}/package-diffs`;
+    return hubWrite(fetchImpl, route, path, args.payload, `submitPackageDiff(${args.entityId})`);
 }
 
 /**
- * Promote a genome in genome-hub. Hard fails on any error.
+ * Promote a genome in genome-hub.
+ * Route A (direct) if HUB_PUBLISH_KEY available, Route B (proxy) if only authToken.
  */
 export async function promoteGenomeViaMarketplace(args: {
     target: GenomePromoteTarget;
     payload: GenomePromotePayload;
     hubUrl?: string;
     hubPublishKey?: string;
+    serverUrl?: string;
+    authToken?: string;
     fetchImpl?: FetchLike;
 }): Promise<HubResult> {
     const fetchImpl = args.fetchImpl ?? (fetch as FetchLike);
-    const hubUrl = (args.hubUrl ?? DEFAULT_GENOME_HUB_URL).replace(/\/$/, '');
-    const url = `${hubUrl}/genomes/${encodeURIComponent(args.target.namespace)}/${encodeURIComponent(args.target.name)}/promote`;
-
-    try {
-        const result = await hubPost(fetchImpl, url, args.hubPublishKey, args.payload, 15_000);
-        if (!result.ok) {
-            result.body = diagnoseFailure(`promote(${args.target.namespace}/${args.target.name})`, hubUrl, result.status, result.body);
-        }
-        return result;
-    } catch (error) {
-        return {
-            ok: false,
-            status: 0,
-            body: diagnoseFailure(`promote(${args.target.namespace}/${args.target.name})`, hubUrl, 0, '', error),
-            transport: 'direct-hub',
-        };
-    }
+    const route = resolveWriteRoute(args);
+    const path = `/genomes/${encodeURIComponent(args.target.namespace)}/${encodeURIComponent(args.target.name)}/promote`;
+    return hubWrite(fetchImpl, route, path, args.payload, `promote(${args.target.namespace}/${args.target.name})`, 15_000);
 }

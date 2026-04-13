@@ -29,68 +29,127 @@ function response(status: number, body: string) {
     return {
         ok: status >= 200 && status < 300,
         status,
-        async text() {
-            return body
-        },
+        async text() { return body },
     }
 }
 
-describe('promoteGenomeViaMarketplace', () => {
-    it('promotes directly when genome-hub accepts the request', async () => {
-        const calls: Array<{ input: string; method?: string }> = []
+describe('route selection: direct vs proxy', () => {
+    it('uses direct hub when HUB_PUBLISH_KEY is available', async () => {
+        process.env.HUB_PUBLISH_KEY = 'test-publish-key'
+        const calls: Array<{ input: string; auth?: string }> = []
         const fetchImpl = async (input: string, init?: RequestInit) => {
-            calls.push({ input, method: init?.method })
+            calls.push({
+                input,
+                auth: (init?.headers as Record<string, string>)?.Authorization,
+            })
             return response(201, '{"genome":{"id":"g-1","version":2}}')
         }
 
         const result = await promoteGenomeViaMarketplace({
             target: { namespace: '@official', name: 'supervisor' },
-            payload: {
-                spec: '{"displayName":"Supervisor"}',
-                isPublic: true,
-                minAvgScore: 60,
-            },
+            payload: { spec: '{}', isPublic: true, minAvgScore: 60 },
             fetchImpl: fetchImpl as any,
         })
 
-        expect(result).toMatchObject({
-            ok: true,
-            status: 201,
-            transport: 'direct-hub',
-        })
+        expect(result.ok).toBe(true)
+        expect(result.transport).toBe('direct-hub')
         expect(calls).toHaveLength(1)
+        expect(calls[0].input).toContain(DEFAULT_HUB_URL)
+        expect(calls[0].auth).toBe('Bearer test-publish-key')
     })
 
-    it('hard fails with diagnosis when genome-hub returns 401', async () => {
-        const fetchImpl = async () => response(401, '{"error":"Unauthorized"}')
+    it('uses server proxy when no HUB_PUBLISH_KEY but authToken provided', async () => {
+        // No HUB_PUBLISH_KEY set
+        const calls: Array<{ input: string; auth?: string }> = []
+        const fetchImpl = async (input: string, init?: RequestInit) => {
+            calls.push({
+                input,
+                auth: (init?.headers as Record<string, string>)?.Authorization,
+            })
+            return response(201, '{"genome":{"id":"g-1","version":2}}')
+        }
 
         const result = await promoteGenomeViaMarketplace({
             target: { namespace: '@official', name: 'supervisor' },
-            payload: {
-                spec: '{"displayName":"Supervisor"}',
-                isPublic: true,
-                minAvgScore: 60,
-            },
+            payload: { spec: '{}', isPublic: true, minAvgScore: 60 },
+            authToken: 'user-session-token',
+            serverUrl: 'https://api.aha-agi.com',
+            fetchImpl: fetchImpl as any,
+        })
+
+        expect(result.ok).toBe(true)
+        expect(result.transport).toBe('server-proxy')
+        expect(calls).toHaveLength(1)
+        expect(calls[0].input).toContain('api.aha-agi.com/v1/')
+        expect(calls[0].auth).toBe('Bearer user-session-token')
+    })
+
+    it('never falls back — direct 401 stays 401, does not try proxy', async () => {
+        process.env.HUB_PUBLISH_KEY = 'wrong-key'
+        const calls: string[] = []
+        const fetchImpl = async (input: string) => {
+            calls.push(input)
+            return response(401, '{"error":"Unauthorized"}')
+        }
+
+        const result = await submitDiffViaMarketplace({
+            namespace: '@official',
+            name: 'implementer',
+            payload: { description: 'test', changes: [] },
+            authToken: 'valid-token',  // would enable proxy in old code
+            serverUrl: 'https://api.aha-agi.com',
             fetchImpl: fetchImpl as any,
         })
 
         expect(result.ok).toBe(false)
         expect(result.status).toBe(401)
         expect(result.transport).toBe('direct-hub')
-        expect(result.body).toContain('Auth rejected')
-        expect(result.body).toContain('HUB_PUBLISH_KEY')
+        expect(calls).toHaveLength(1)  // only one call, no fallback to proxy
+        expect(result.body).toContain('HUB_PUBLISH_KEY rejected')
+    })
+})
+
+describe('hard fail with diagnosis', () => {
+    it('diagnoses auth failure on direct route', async () => {
+        process.env.HUB_PUBLISH_KEY = 'bad-key'
+        const fetchImpl = async () => response(401, '{"error":"Unauthorized"}')
+
+        const result = await submitPackageDiffViaMarketplace({
+            entityId: 'entity-1',
+            payload: { description: 'test', baseVersion: 1, ops: [] },
+            fetchImpl: fetchImpl as any,
+        })
+
+        expect(result.ok).toBe(false)
+        expect(result.body).toContain('HUB_PUBLISH_KEY rejected')
+        expect(result.body).toContain('bad-key'.slice(0, 8))
     })
 
-    it('hard fails with diagnosis on network error', async () => {
+    it('diagnoses auth failure on proxy route', async () => {
+        // No HUB_PUBLISH_KEY → proxy route
+        const fetchImpl = async () => response(401, '{"error":"Unauthorized"}')
+
+        const result = await submitPackageDiffViaMarketplace({
+            entityId: 'entity-1',
+            payload: { description: 'test', baseVersion: 1, ops: [] },
+            authToken: 'expired-token',
+            serverUrl: 'https://api.test.com',
+            fetchImpl: fetchImpl as any,
+        })
+
+        expect(result.ok).toBe(false)
+        expect(result.transport).toBe('server-proxy')
+        expect(result.body).toContain('Auth token rejected')
+        expect(result.body).toContain('Re-login')
+    })
+
+    it('diagnoses network error', async () => {
+        process.env.HUB_PUBLISH_KEY = 'key'
         const fetchImpl = async () => { throw new Error('ECONNREFUSED') }
 
-        const result = await promoteGenomeViaMarketplace({
-            target: { namespace: '@official', name: 'supervisor' },
-            payload: {
-                spec: '{"displayName":"Supervisor"}',
-                isPublic: true,
-                minAvgScore: 60,
-            },
+        const result = await submitPackageDiffViaMarketplace({
+            entityId: 'entity-1',
+            payload: { description: 'test', baseVersion: 1, ops: [] },
             fetchImpl: fetchImpl as any,
         })
 
@@ -99,107 +158,20 @@ describe('promoteGenomeViaMarketplace', () => {
         expect(result.body).toContain('Network unreachable')
         expect(result.body).toContain('ECONNREFUSED')
     })
-})
 
-describe('submitDiffViaMarketplace', () => {
-    it('submits diff directly when genome-hub accepts', async () => {
-        const fetchImpl = async () => response(201, '{"genome":{"version":2},"diff":{"id":"d-1"}}')
-
-        const result = await submitDiffViaMarketplace({
-            namespace: '@official',
-            name: 'implementer',
-            payload: {
-                description: 'test diff',
-                changes: [{ type: 'kv', path: 'behavior.onIdle', to: 'self-assign' }],
-            },
-            fetchImpl: fetchImpl as any,
-        })
-
-        expect(result).toMatchObject({ ok: true, status: 201, transport: 'direct-hub' })
-    })
-
-    it('hard fails with diagnosis on 403', async () => {
-        const fetchImpl = async () => response(403, '{"error":"Forbidden"}')
+    it('diagnoses missing credentials entirely', async () => {
+        // No HUB_PUBLISH_KEY, no authToken
+        const fetchImpl = async () => response(401, '')
 
         const result = await submitDiffViaMarketplace({
             namespace: '@official',
-            name: 'implementer',
-            payload: {
-                description: 'test diff',
-                changes: [],
-            },
+            name: 'test',
+            payload: { description: 'test', changes: [] },
             fetchImpl: fetchImpl as any,
         })
 
         expect(result.ok).toBe(false)
-        expect(result.status).toBe(403)
-        expect(result.body).toContain('Auth rejected')
-    })
-})
-
-describe('submitPackageDiffViaMarketplace', () => {
-    it('submits package diffs directly when genome-hub accepts', async () => {
-        const calls: Array<{ input: string }> = []
-        const fetchImpl = async (input: string) => {
-            calls.push({ input })
-            return response(201, '{"entity":{"id":"e-1","version":2},"diff":{"id":"d-1"}}')
-        }
-
-        const result = await submitPackageDiffViaMarketplace({
-            entityId: 'entity-1',
-            payload: {
-                description: 'Mutate package manifest',
-                baseVersion: 1,
-                ops: [{ type: 'manifest_set', path: 'behavior.onIdle', value: 'self-assign' }],
-            },
-            fetchImpl: fetchImpl as any,
-        })
-
-        expect(result).toMatchObject({ ok: true, status: 201, transport: 'direct-hub' })
-        expect(calls).toHaveLength(1)
-        expect(calls[0].input).toBe(`${DEFAULT_HUB_URL}/entities/id/entity-1/package-diffs`)
-    })
-
-    it('hard fails on 403 — no silent fallback', async () => {
-        const calls: Array<string> = []
-        const fetchImpl = async (input: string) => {
-            calls.push(input)
-            return response(403, '{"error":"Forbidden"}')
-        }
-
-        const result = await submitPackageDiffViaMarketplace({
-            entityId: 'entity-1',
-            payload: {
-                description: 'Mutate package manifest',
-                baseVersion: 1,
-                ops: [{ type: 'manifest_set', path: 'behavior.onIdle', value: 'self-assign' }],
-            },
-            fetchImpl: fetchImpl as any,
-        })
-
-        expect(result.ok).toBe(false)
-        expect(result.status).toBe(403)
-        expect(result.body).toContain('Auth rejected')
-        expect(calls).toHaveLength(1) // no second call to proxy
-    })
-
-    it('hard fails on network error with actionable diagnosis', async () => {
-        const fetchImpl = async () => { throw new Error('fetch failed: ECONNREFUSED') }
-
-        const result = await submitPackageDiffViaMarketplace({
-            entityId: 'entity-1',
-            payload: {
-                description: 'test',
-                baseVersion: 1,
-                ops: [],
-            },
-            fetchImpl: fetchImpl as any,
-        })
-
-        expect(result.ok).toBe(false)
-        expect(result.status).toBe(0)
-        expect(result.body).toContain('Network unreachable')
-        expect(result.body).toContain('GENOME_HUB_URL')
-        expect(result.body).toContain('ECONNREFUSED')
+        expect(result.body).toContain('No HUB_PUBLISH_KEY found')
+        expect(result.body).toContain('login to provision')
     })
 })

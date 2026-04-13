@@ -2549,6 +2549,8 @@ export function registerSupervisorTools(ctx: McpToolContext): void {
                 },
                 hubUrl,
                 hubPublishKey: publishKey,
+                serverUrl: configuration.serverUrl,
+                authToken: client.getAuthToken(),
             });
 
             if (!diffResult.ok) {
@@ -2820,6 +2822,8 @@ export function registerSupervisorTools(ctx: McpToolContext): void {
                 },
                 hubUrl,
                 hubPublishKey: publishKey,
+                serverUrl: configuration.serverUrl,
+                authToken: client.getAuthToken(),
             });
 
             if (!diffResult.ok) {
@@ -3665,6 +3669,8 @@ export function registerSupervisorTools(ctx: McpToolContext): void {
                         },
                         hubUrl: process.env.GENOME_HUB_URL ?? DEFAULT_GENOME_HUB_URL,
                         hubPublishKey: publishKey || undefined,
+                        serverUrl: configuration.serverUrl,
+                        authToken: client.getAuthToken(),
                     });
                     if (!diffResult.ok) {
                         logger.debug(
