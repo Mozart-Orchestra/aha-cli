@@ -2822,6 +2822,8 @@ export function registerSupervisorTools(ctx: McpToolContext): void {
                 },
                 hubUrl,
                 hubPublishKey: publishKey,
+                serverUrl: configuration.serverUrl,
+                authToken: client.getAuthToken(),
             });
 
             if (!diffResult.ok) {
