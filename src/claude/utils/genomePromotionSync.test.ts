@@ -122,7 +122,7 @@ describe('hard fail with diagnosis', () => {
 
         expect(result.ok).toBe(false)
         expect(result.body).toContain('HUB_PUBLISH_KEY rejected')
-        expect(result.body).toContain('bad-key'.slice(0, 8))
+        expect(result.body).toContain('7 chars')
     })
 
     it('diagnoses auth failure on proxy route', async () => {

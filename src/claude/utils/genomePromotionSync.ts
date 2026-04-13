@@ -1,7 +1,8 @@
 import { configuration } from '@/configuration'
 import { DEFAULT_GENOME_HUB_URL } from '@/configurationResolver'
 import type { DiffChange } from '@/api/types/genome'
-import { resolveGenomeHubWriteTokenSync } from '@/utils/genomeHubAuth'
+import { resolveGenomeHubWriteTokenSync, decodeJwtExpiryMs } from '@/utils/genomeHubAuth'
+import { readPublishKeyFromSettings } from '@/configurationResolver'
 
 type FetchResponseLike = {
     ok: boolean;
@@ -81,6 +82,32 @@ type WriteRoute =
     | { kind: 'direct'; hubUrl: string; hubPublishKey: string }
     | { kind: 'proxy'; serverUrl: string; authToken: string };
 
+/**
+ * Resolve a static HUB_PUBLISH_KEY only (not JWTs).
+ * genome-hub does string comparison: it only accepts the exact static key.
+ * JWTs from GENOME_HUB_AUTH_TOKEN / cache belong to the proxy path.
+ */
+function resolveStaticPublishKey(explicit?: string): string | undefined {
+    // Explicit key from caller (non-JWT)
+    if (explicit && decodeJwtExpiryMs(explicit) === null) {
+        return explicit;
+    }
+
+    // HUB_PUBLISH_KEY env (non-JWT)
+    const envKey = process.env.HUB_PUBLISH_KEY;
+    if (envKey && decodeJwtExpiryMs(envKey) === null) {
+        return envKey;
+    }
+
+    // settings.json publishKey (non-JWT)
+    const settingsKey = readPublishKeyFromSettings(configuration.settingsFile);
+    if (settingsKey && decodeJwtExpiryMs(settingsKey) === null) {
+        return settingsKey;
+    }
+
+    return undefined;
+}
+
 function resolveWriteRoute(args: {
     hubUrl?: string;
     hubPublishKey?: string;
@@ -88,14 +115,15 @@ function resolveWriteRoute(args: {
     authToken?: string;
 }): WriteRoute {
     const hubUrl = (args.hubUrl ?? DEFAULT_GENOME_HUB_URL).replace(/\/$/, '');
-    const hubPublishKey = resolveGenomeHubWriteTokenSync(args.hubPublishKey);
+    const staticKey = resolveStaticPublishKey(args.hubPublishKey);
 
-    if (hubPublishKey) {
-        return { kind: 'direct', hubUrl, hubPublishKey };
+    if (staticKey) {
+        return { kind: 'direct', hubUrl, hubPublishKey: staticKey };
     }
 
+    // No static key — try proxy with auth token (JWT or session token)
     const serverUrl = (args.serverUrl ?? configuration.serverUrl).replace(/\/$/, '');
-    const authToken = args.authToken;
+    const authToken = args.authToken ?? resolveGenomeHubWriteTokenSync();
 
     if (authToken) {
         return { kind: 'proxy', serverUrl, authToken };
@@ -133,7 +161,7 @@ function diagnoseFailure(
             lines.push(
                 `  Diagnosis: HUB_PUBLISH_KEY rejected by genome-hub.`,
                 `  Action: Run \`docker exec happyhere-genome-hub-1 printenv HUB_PUBLISH_KEY\` and compare.`,
-                `  Has key: ${route.hubPublishKey ? 'yes (' + route.hubPublishKey.slice(0, 8) + '...)' : 'NO — this is the bug'}`,
+                `  Has key: ${route.hubPublishKey ? 'yes (' + route.hubPublishKey.length + ' chars)' : 'NO — set HUB_PUBLISH_KEY or login to provision'}`,
             );
         } else {
             lines.push(
