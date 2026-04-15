@@ -7,11 +7,13 @@ import { logger } from '@/ui/logger';
 import { clearDaemonState, readDaemonState, readDaemonStateRaw } from '@/persistence';
 import { Metadata } from '@/api/types';
 import { projectPath } from '@/projectPath';
-import { readFileSync } from 'fs';
+import { readFileSync, statSync } from 'fs';
 import { join } from 'path';
 import { configuration } from '@/configuration';
 import { spawnAhaCLI } from '@/utils/spawnAhaCLI';
 import { stripSessionScopedAhaEnv } from '@/utils/sessionScopedAhaEnv';
+
+const DAEMON_LOCK_STARTUP_GRACE_MS = 10_000;
 
 export async function daemonPost(path: string, body?: any): Promise<{ error?: string } | any> {
   const state = await readDaemonState();
@@ -162,6 +164,14 @@ function readDaemonLockPid(): number | null {
   }
 }
 
+function readDaemonLockAgeMs(): number | null {
+  try {
+    return Date.now() - statSync(configuration.daemonLockFile).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
 async function cleanupOrphanedDaemonLock(): Promise<void> {
   const rawState = await readDaemonStateRaw();
   if (rawState && rawState.state !== 'stopped') {
@@ -176,6 +186,12 @@ async function cleanupOrphanedDaemonLock(): Promise<void> {
   if (!(await isPidRunning(lockPid))) {
     logger.debug('[DAEMON RUN] Lock file points to a dead PID, cleaning up stale daemon metadata');
     await cleanupDaemonState();
+    return;
+  }
+
+  const lockAgeMs = readDaemonLockAgeMs();
+  if (lockAgeMs !== null && lockAgeMs < DAEMON_LOCK_STARTUP_GRACE_MS) {
+    logger.debug(`[DAEMON RUN] Lock file for PID ${lockPid} is only ${lockAgeMs}ms old; daemon may still be starting, skipping orphan cleanup`);
     return;
   }
 
@@ -257,9 +273,9 @@ export async function isDaemonRunningCurrentlyInstalledAhaVersion(): Promise<boo
   }
 }
 
-export async function cleanupDaemonState(): Promise<void> {
+export async function cleanupDaemonState(reason?: string): Promise<void> {
   try {
-    await clearDaemonState();
+    await clearDaemonState(reason);
     logger.debug('[DAEMON RUN] Daemon state file removed');
   } catch (error) {
     logger.debug('[DAEMON RUN] Error cleaning up daemon metadata', error);

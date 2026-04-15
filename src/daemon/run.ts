@@ -239,6 +239,11 @@ export async function startDaemon(): Promise<void> {
   });
 
   process.on('SIGHUP', () => {
+    const elapsed = Date.now() - startedAt;
+    if (elapsed < STARTUP_GRACE_MS) {
+      logger.debug(`[DAEMON RUN] Received SIGHUP during startup grace period (${elapsed}ms) — ignoring`);
+      return;
+    }
     logger.debug('[DAEMON RUN] Received SIGHUP (terminal closed)');
     requestShutdown('os-signal');
   });
@@ -853,7 +858,7 @@ export async function startDaemon(): Promise<void> {
       logger.debug(`[DAEMON RUN] Starting proper cleanup (source: ${source}, errorMessage: ${errorMessage})...`);
 
       // Remove state early so callers immediately observe that the daemon is shutting down.
-      await cleanupDaemonState();
+      await cleanupDaemonState(source);
 
       if (shutdownForceExitTimer) {
         clearTimeout(shutdownForceExitTimer);
@@ -883,7 +888,7 @@ export async function startDaemon(): Promise<void> {
       if (stopControlServer) {
         await stopControlServer();
       }
-      await cleanupDaemonState();
+      await cleanupDaemonState(source);
       await stopCaffeinate();
       await releaseDaemonLock(daemonLockHandle);
 
