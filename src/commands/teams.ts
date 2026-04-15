@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { DEFAULT_KANBAN_BOARD } from '@/claude/team/roles.config';
 import { ApiClient } from '@/api/api';
+import { DEFAULT_GENOME_HUB_URL } from '@/configurationResolver';
 import { logger } from '@/ui/logger';
 import { readCredentials } from '@/persistence';
 import { authAndSetupMachineIfNeeded } from '@/ui/auth';
@@ -1431,7 +1432,7 @@ async function spawnTeamWithPreset(
     // Fetch genome from hub — hard fail if unreachable. No fallback = no hidden broken state.
     let genomeSpec: import('../api/types/genome').AgentImage | null = null;
     let resolvedSpecId: string | null = null;
-    const hubUrl = process.env.GENOME_HUB_URL || 'https://ahaagi.com/api/v2';
+    const hubUrl = process.env.GENOME_HUB_URL || DEFAULT_GENOME_HUB_URL;
     const encodedNs = encodeURIComponent('@official');
     const genomeUrl = `${hubUrl}/genomes/${encodedNs}/${encodeURIComponent(roleId)}`;
 

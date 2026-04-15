@@ -41,6 +41,37 @@ function decryptJoinPayload(encryptedBundle: Uint8Array, recipientSecretKey: Uin
   return tweetnacl.box.open(encrypted, nonce, ephemeralPublicKey, recipientSecretKey);
 }
 
+function describeRedeemJoinError(error: unknown, ticket: string): string {
+  if (axios.isAxiosError(error)) {
+    const responseCode = error.response?.data?.code;
+    const responseError = typeof error.response?.data?.error === 'string'
+      ? error.response.data.error
+      : null;
+
+    if (responseCode === 'JOIN_TICKET_INVALID') {
+      return `Join code "${ticket}" is invalid or expired on ${configuration.serverUrl}. Generate a fresh code with \`aha auth show-join-code\` on a signed-in device.`;
+    }
+
+    if (responseCode === 'RECOVERY_NOT_READY') {
+      return 'Automatic recovery is not ready for this account yet. Finish recovery setup on the source machine, then generate a fresh join code.';
+    }
+
+    if (responseError) {
+      return responseError;
+    }
+
+    if (error.response?.status) {
+      return `Request failed with status code ${error.response.status}`;
+    }
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return 'Unknown error';
+}
+
 export async function redeemAccountJoinTicket(ticket: string): Promise<{
   token: string;
   userId: string;
@@ -48,10 +79,15 @@ export async function redeemAccountJoinTicket(ticket: string): Promise<{
 }> {
   const keypair = generateEphemeralBoxKeyPair();
 
-  const response = await axios.post(`${configuration.serverUrl}/v1/auth/account/join`, {
-    ticket,
-    publicKey: encodeBase64(keypair.publicKey),
-  });
+  let response;
+  try {
+    response = await axios.post(`${configuration.serverUrl}/v1/auth/account/join`, {
+      ticket,
+      publicKey: encodeBase64(keypair.publicKey),
+    });
+  } catch (error) {
+    throw new Error(describeRedeemJoinError(error, ticket));
+  }
 
   const encryptedContentSecretKey = decodeBase64(response.data.encryptedContentSecretKey);
   const secret = decryptJoinPayload(encryptedContentSecretKey, keypair.secretKey);

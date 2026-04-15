@@ -27,7 +27,7 @@ const DEFAULT_CREDENTIALS_FILE = join(DEFAULT_AHA_HOME, 'access.key');
 const DEFAULT_LOCK_FILE = join(ROOT, '.bootstrap.lock');
 const DEFAULT_HANDOFF_FILE = join(ROOT, '.aha', 'bootstrap-handoff.json');
 const DEFAULT_DAEMON_CMD = ['node', 'dist/index.mjs', 'daemon', 'start-sync'];
-const DEFAULT_SERVER_URL = process.env.AHA_SERVER_URL || 'https://aha-agi.com/api';
+const DEFAULT_SERVER_URL = process.env.AHA_SERVER_URL || 'https://ahaagi.com/api';
 const MAX_WAIT_SECONDS = 30;
 
 const cmd = process.argv[2] ?? 'restart';

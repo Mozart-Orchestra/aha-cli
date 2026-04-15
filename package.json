@@ -1,6 +1,6 @@
 {
   "name": "aha-agi",
-  "version": "1.0.25",
+  "version": "1.0.29",
   "description": "Mobile and Web client for Claude Code and Codex",
   "author": "swmtjy",
   "license": "MIT",
@@ -67,6 +67,7 @@
     "dev:integration-test-env": "yarn build && tsx --env-file .env.integration-test src/index.ts",
     "prepack": "yarn build && node scripts/prepare-npm-package.mjs",
     "prepublishOnly": "echo 'skipping tests for binary publish'",
+    "publish:npm": "bash scripts/npm-publish.sh",
     "release": "release-it",
     "postinstall": "node scripts/unpack-tools.cjs && node scripts/install-git-hooks.cjs",
     "install:git-hooks": "node scripts/install-git-hooks.cjs",

@@ -1,20 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockSpawn, mockExistsSync } = vi.hoisted(() => ({
+const { mockSpawn } = vi.hoisted(() => ({
   mockSpawn: vi.fn(() => ({ pid: 1234 })),
-  mockExistsSync: vi.fn(() => true),
 }));
 
 vi.mock('child_process', () => ({
   spawn: mockSpawn,
-}));
-
-vi.mock('node:fs', () => ({
-  existsSync: mockExistsSync,
-}));
-
-vi.mock('@/projectPath', () => ({
-  projectPath: () => '/tmp/aha-cli',
 }));
 
 vi.mock('@/ui/logger', () => ({
@@ -30,7 +21,6 @@ describe('spawnAhaCLI', () => {
 
   beforeEach(() => {
     mockSpawn.mockClear();
-    mockExistsSync.mockReturnValue(true);
   });
 
   afterEach(() => {
@@ -46,17 +36,12 @@ describe('spawnAhaCLI', () => {
     });
 
     expect(mockSpawn).toHaveBeenCalledWith(
-      'node',
-      [
-        '--no-warnings',
-        '--no-deprecation',
-        '/tmp/aha-cli/dist/index.mjs',
-        'daemon',
-        'start-sync',
-      ],
+      'aha',
+      ['daemon', 'start-sync'],
       expect.objectContaining({
         detached: true,
         stdio: 'ignore',
+        shell: true,
         windowsHide: true,
       }),
     );
@@ -72,9 +57,10 @@ describe('spawnAhaCLI', () => {
     });
 
     expect(mockSpawn).toHaveBeenCalledWith(
-      'node',
-      expect.any(Array),
+      'aha',
+      ['daemon', 'start-sync'],
       expect.objectContaining({
+        shell: true,
         windowsHide: false,
       }),
     );
@@ -89,10 +75,17 @@ describe('spawnAhaCLI', () => {
     });
 
     expect(mockSpawn).toHaveBeenCalledWith(
-      'node',
-      expect.any(Array),
+      'aha',
+      ['daemon', 'start-sync'],
       expect.not.objectContaining({
         windowsHide: true,
+      }),
+    );
+    expect(mockSpawn).toHaveBeenCalledWith(
+      'aha',
+      ['daemon', 'start-sync'],
+      expect.objectContaining({
+        shell: false,
       }),
     );
   });

@@ -5,16 +5,17 @@ const mockPost = vi.hoisted(() => vi.fn());
 vi.mock('axios', () => ({
   default: {
     post: mockPost,
+    isAxiosError: (error: unknown) => Boolean((error as { isAxiosError?: boolean })?.isAxiosError),
   },
 }));
 
 vi.mock('@/configuration', () => ({
   configuration: {
-    serverUrl: 'https://aha-agi.test',
+    serverUrl: 'https://ahaagi.test',
   },
 }));
 
-import { createAccountJoinTicket } from './accountJoin';
+import { createAccountJoinTicket, redeemAccountJoinTicket } from './accountJoin';
 
 describe('createAccountJoinTicket', () => {
   beforeEach(() => {
@@ -35,7 +36,7 @@ describe('createAccountJoinTicket', () => {
     });
 
     expect(mockPost).toHaveBeenCalledWith(
-      'https://aha-agi.test/v1/account/join-ticket',
+      'https://ahaagi.test/v1/account/join-ticket',
       {},
       {
         headers: {
@@ -67,5 +68,22 @@ describe('createAccountJoinTicket', () => {
     });
 
     await expect(createAccountJoinTicket('token-123')).rejects.toThrow('Server did not return a join ticket');
+  });
+
+  it('surfaces a helpful error when the join code is invalid or expired', async () => {
+    mockPost.mockRejectedValue({
+      isAxiosError: true,
+      response: {
+        status: 404,
+        data: {
+          error: 'Join code is invalid or expired',
+          code: 'JOIN_TICKET_INVALID',
+        },
+      },
+    });
+
+    await expect(redeemAccountJoinTicket('GHYHU3')).rejects.toThrow(
+      'Join code "GHYHU3" is invalid or expired on https://ahaagi.test. Generate a fresh code with `aha auth show-join-code` on a signed-in device.',
+    );
   });
 });

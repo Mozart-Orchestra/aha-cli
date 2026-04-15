@@ -1280,9 +1280,11 @@ function tryAutoStash(session: TrackedSession): void {
       `for crashed agent ${role} (${sessionId})`
     );
 
-    // Stage all changes and stash with descriptive message
+    // Stage all changes and stash with descriptive message.
+    // Exclude node_modules to prevent clearing dependency directories
+    // when .gitignore doesn't cover them (e.g., project roots without package.json).
     const stashMessage = `auto-stash: agent ${role} (${sessionId}) crashed at ${new Date().toISOString()}`;
-    execSync(`git add -A && git stash push -m "${stashMessage}" 2>/dev/null`, {
+    execSync(`git add -A -- . ':!node_modules' && git stash push -m "${stashMessage}" -- . ':!node_modules' 2>/dev/null`, {
       cwd: directory,
       encoding: 'utf-8',
       timeout: 10000,
