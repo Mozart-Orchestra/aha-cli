@@ -14,13 +14,17 @@
  * - `npm i aha-agi && npx aha ...` flows
  */
 
-import { spawn, SpawnOptions, type ChildProcess } from 'child_process';
-import { existsSync } from 'node:fs';
+import { execSync, spawn, SpawnOptions, type ChildProcess } from 'child_process';
+import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logger } from '@/ui/logger';
 import { withWindowsHide } from '@/utils/windowsProcessOptions';
 
+/**
+ * Resolve the aha-agi package root by walking up from `import.meta.url`
+ * to find the nearest `package.json`.
+ */
 function resolveCurrentPackageRoot(): string {
   let currentDir = dirname(fileURLToPath(import.meta.url));
 
@@ -38,25 +42,66 @@ function resolveCurrentPackageRoot(): string {
   }
 }
 
+/**
+ * When `import.meta.url` points to a deleted path (e.g. node_modules cleared
+ * while daemon is running), fall back to locating `aha` via PATH and resolving
+ * its package root from there.
+ */
+function resolveFallbackPackageRoot(): string | null {
+  try {
+    const ahaPath = execSync('which aha 2>/dev/null', { encoding: 'utf-8' }).trim();
+    if (!ahaPath) return null;
+
+    // Resolve symlinks: global installs typically have
+    //   /opt/homebrew/bin/aha → ../lib/node_modules/aha-agi/bin/aha.mjs
+    const realPath = realpathSync(ahaPath);
+    // Real layout: <prefix>/lib/node_modules/aha-agi/bin/aha.mjs
+    // Package root is one dirname up from bin/
+    const pkgRoot = dirname(dirname(realPath));
+    const distEntrypoint = join(pkgRoot, 'dist', 'index.mjs');
+    return existsSync(distEntrypoint) ? pkgRoot : null;
+  } catch {
+    return null;
+  }
+}
+
 function resolveCurrentEntrypoint(): string[] {
-  const packageRoot = resolveCurrentPackageRoot();
-  const distEntrypoint = join(packageRoot, 'dist', 'index.mjs');
-  if (existsSync(distEntrypoint)) {
-    return ['--no-warnings', '--no-deprecation', distEntrypoint];
+  let packageRoot: string | null = null;
+  try {
+    packageRoot = resolveCurrentPackageRoot();
+  } catch {
+    // import.meta.url path may be entirely gone (node_modules cleared)
+  }
+
+  if (packageRoot) {
+    const distEntrypoint = join(packageRoot, 'dist', 'index.mjs');
+    if (existsSync(distEntrypoint)) {
+      return ['--no-warnings', '--no-deprecation', distEntrypoint];
+    }
+  }
+
+  // import.meta.url path no longer exists on disk — try PATH fallback
+  const fallbackRoot = resolveFallbackPackageRoot();
+  if (fallbackRoot) {
+    const fallbackEntrypoint = join(fallbackRoot, 'dist', 'index.mjs');
+    logger.debug(`[SPAWN AHA CLI] import.meta.url path gone; falling back to PATH-resolved: ${fallbackEntrypoint}`);
+    return ['--no-warnings', '--no-deprecation', fallbackEntrypoint];
   }
 
   const allowSourceFallback = process.env.AHA_ALLOW_SOURCE_FALLBACK === '1';
-  const tsxEntrypoint = join(packageRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
-  const sourceEntrypoint = join(packageRoot, 'src', 'index.ts');
-  if (allowSourceFallback && existsSync(tsxEntrypoint) && existsSync(sourceEntrypoint)) {
-    logger.debug(`[SPAWN AHA CLI] Using source fallback via tsx: ${sourceEntrypoint}`);
-    return ['--no-warnings', '--no-deprecation', tsxEntrypoint, sourceEntrypoint];
+  if (allowSourceFallback && packageRoot) {
+    const tsxEntrypoint = join(packageRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
+    const sourceEntrypoint = join(packageRoot, 'src', 'index.ts');
+    if (existsSync(tsxEntrypoint) && existsSync(sourceEntrypoint)) {
+      logger.debug(`[SPAWN AHA CLI] Using source fallback via tsx: ${sourceEntrypoint}`);
+      return ['--no-warnings', '--no-deprecation', tsxEntrypoint, sourceEntrypoint];
+    }
   }
 
   const fallbackHint = allowSourceFallback
     ? ''
     : ` To intentionally use source fallback in dev, set AHA_ALLOW_SOURCE_FALLBACK=1.`;
-  throw new Error(`Entrypoint ${distEntrypoint} does not exist.${fallbackHint}`);
+  throw new Error(`Entrypoint ${packageRoot ? join(packageRoot, 'dist', 'index.mjs') : 'unresolved'} does not exist.${fallbackHint}`);
 }
 
 function shellEscape(value: string): string {

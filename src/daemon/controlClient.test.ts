@@ -6,12 +6,14 @@ const {
   mockClearDaemonState,
   mockReadFileSync,
   mockStatSync,
+  mockSpawnAhaCLI,
 } = vi.hoisted(() => ({
   mockReadDaemonState: vi.fn(),
   mockReadDaemonStateRaw: vi.fn(),
   mockClearDaemonState: vi.fn(),
   mockReadFileSync: vi.fn(),
   mockStatSync: vi.fn(),
+  mockSpawnAhaCLI: vi.fn(),
 }));
 
 vi.mock('@/persistence', () => ({
@@ -42,30 +44,36 @@ vi.mock('@/projectPath', () => ({
 }));
 
 vi.mock('@/utils/spawnAhaCLI', () => ({
-  spawnAhaCLI: vi.fn(),
+  spawnAhaCLI: mockSpawnAhaCLI,
 }));
 
 vi.mock('@/utils/sessionScopedAhaEnv', () => ({
   stripSessionScopedAhaEnv: vi.fn((env: NodeJS.ProcessEnv) => env),
 }));
 
-import { checkIfDaemonRunningAndCleanupStaleState } from '@/daemon/controlClient';
+import { checkIfDaemonRunningAndCleanupStaleState, startDaemonDetached } from '@/daemon/controlClient';
 
 describe('checkIfDaemonRunningAndCleanupStaleState', () => {
+  const originalPlatform = process.platform;
+
   beforeEach(() => {
     mockReadDaemonState.mockReset();
     mockReadDaemonStateRaw.mockReset();
     mockClearDaemonState.mockReset();
     mockReadFileSync.mockReset();
     mockStatSync.mockReset();
+    mockSpawnAhaCLI.mockReset();
 
     mockReadDaemonState.mockResolvedValue(null);
     mockReadDaemonStateRaw.mockResolvedValue(null);
     mockClearDaemonState.mockResolvedValue(undefined);
     mockReadFileSync.mockReturnValue('42424');
+    mockSpawnAhaCLI.mockReturnValue({ exitCode: 0, unref: vi.fn() });
   });
 
   afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: originalPlatform });
+    delete process.env.AHA_DAEMON_START_TIMEOUT_MS;
     vi.restoreAllMocks();
   });
 
@@ -116,5 +124,18 @@ describe('checkIfDaemonRunningAndCleanupStaleState', () => {
     expect(running).toBe(false);
     expect(killSpy).toHaveBeenCalledWith(42424, 'SIGTERM');
     expect(mockClearDaemonState).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats launchctl acceptance as success on macOS even before state appears', async () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    process.env.AHA_DAEMON_START_TIMEOUT_MS = '1';
+    mockReadFileSync.mockImplementation(() => {
+      throw new Error('ENOENT');
+    });
+
+    const started = await startDaemonDetached();
+
+    expect(started).toBe(true);
+    expect(mockSpawnAhaCLI).toHaveBeenCalledTimes(1);
   });
 });

@@ -20,7 +20,7 @@ import { authAndSetupMachineIfNeeded } from './ui/auth'
 import packageJson from '../package.json'
 import { z } from 'zod'
 import { startDaemon } from './daemon/run'
-import { checkIfDaemonRunningAndCleanupStaleState, isDaemonRunningCurrentlyInstalledAhaVersion, stopDaemon } from './daemon/controlClient'
+import { checkIfDaemonRunningAndCleanupStaleState, isDaemonRunningCurrentlyInstalledAhaVersion, startDaemonDetached, stopDaemon } from './daemon/controlClient'
 import { getLatestDaemonLog } from './ui/logger'
 import { killRunawayAhaProcesses } from './daemon/doctor'
 import { install } from './daemon/install'
@@ -352,23 +352,7 @@ function handleTopLevelCommandError(error: unknown): never {
       return
 
     } else if (daemonSubcommand === 'start') {
-      // Spawn detached daemon process
-      const child = spawnAhaCLI(['daemon', 'start-sync'], {
-        detached: true,
-        stdio: 'ignore',
-        env: stripSessionScopedAhaEnv(process.env, { stripClaudeCode: true })
-      });
-      child.unref();
-
-      // Wait for daemon to write state file (up to 5 seconds)
-      let started = false;
-      for (let i = 0; i < 50; i++) {
-        if (await checkIfDaemonRunningAndCleanupStaleState()) {
-          started = true;
-          break;
-        }
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
+      const started = await startDaemonDetached();
 
       if (started) {
         console.log(t('daemon.startedSuccess'));

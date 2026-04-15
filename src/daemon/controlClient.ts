@@ -14,6 +14,7 @@ import { spawnAhaCLI } from '@/utils/spawnAhaCLI';
 import { stripSessionScopedAhaEnv } from '@/utils/sessionScopedAhaEnv';
 
 const DAEMON_LOCK_STARTUP_GRACE_MS = 10_000;
+const DEFAULT_DAEMON_START_TIMEOUT_MS = process.platform === 'darwin' ? 30_000 : 5_000;
 
 export async function daemonPost(path: string, body?: any): Promise<{ error?: string } | any> {
   const state = await readDaemonState();
@@ -282,19 +283,81 @@ export async function cleanupDaemonState(reason?: string): Promise<void> {
   }
 }
 
+function getDaemonStartTimeoutMs(): number {
+  const configuredTimeout = Number(process.env.AHA_DAEMON_START_TIMEOUT_MS);
+  if (Number.isFinite(configuredTimeout) && configuredTimeout > 0) {
+    return configuredTimeout;
+  }
+  return DEFAULT_DAEMON_START_TIMEOUT_MS;
+}
+
+async function waitForChildExitCode(child: ReturnType<typeof spawnAhaCLI>, timeoutMs: number): Promise<number | null> {
+  if (child.exitCode !== null) {
+    return child.exitCode;
+  }
+
+  return await new Promise<number | null>((resolve) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      child.off('exit', onExit);
+      child.off('error', onError);
+    };
+
+    const onExit = (code: number | null) => {
+      cleanup();
+      resolve(code ?? 0);
+    };
+
+    const onError = () => {
+      cleanup();
+      resolve(1);
+    };
+
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve(null);
+    }, timeoutMs);
+
+    child.once('exit', onExit);
+    child.once('error', onError);
+  });
+}
+
+async function waitForDaemonStartup(): Promise<boolean> {
+  const timeoutMs = getDaemonStartTimeoutMs();
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await checkIfDaemonRunningAndCleanupStaleState()) {
+      return true;
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+
+  return false;
+}
+
 export async function startDaemonDetached(): Promise<boolean> {
   const child = spawnAhaCLI(['daemon', 'start-sync'], {
     detached: true,
     stdio: 'ignore',
     env: stripSessionScopedAhaEnv(process.env, { stripClaudeCode: true })
   });
+
+  const launchAccepted = process.platform === 'darwin'
+    ? (await waitForChildExitCode(child, 5_000)) === 0
+    : false;
+
   child.unref();
 
-  for (let i = 0; i < 50; i++) {
-    if (await checkIfDaemonRunningAndCleanupStaleState()) {
-      return true;
-    }
-    await new Promise(resolve => setTimeout(resolve, 100));
+  const started = await waitForDaemonStartup();
+  if (started) {
+    return true;
+  }
+
+  if (process.platform === 'darwin' && launchAccepted) {
+    logger.debug('[DAEMON CONTROL] launchctl accepted daemon job; returning success before state file appears');
+    return true;
   }
 
   return false;
