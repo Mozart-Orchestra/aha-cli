@@ -156,16 +156,13 @@ async function patchFeedbackViaServerProxy(
 }
 
 export function normalizeFeedbackProxyBaseUrl(serverUrl: string): string {
-    try {
-        // configuration.serverUrl may point at an API-prefixed base such as
-        // https://aha-agi.com/api, but the feedback proxy route lives at
-        // the site origin under /v1/genomes/...
-        return new URL(serverUrl).origin.replace(/\/$/, '');
-    } catch {
-        return serverUrl
-            .replace(/\/api\/v\d+\/?$/i, '')
-            .replace(/\/$/, '');
-    }
+    // Strip trailing version suffix (/v1, /v2, etc.) but preserve base path like /api.
+    // e.g. https://ahaagi.com/api/v2 → https://ahaagi.com/api
+    //      https://ahaagi.com/api    → https://ahaagi.com/api
+    // The feedback proxy route lives at {serverBase}/v1/genomes/...
+    return serverUrl
+        .replace(/\/v\d+\/?$/, '')
+        .replace(/\/$/, '');
 }
 
 function canAutoCreateOfficialTarget(target: FeedbackUploadTarget): boolean {
@@ -246,7 +243,7 @@ export async function syncGenomeFeedbackToMarketplace(args: {
     const rawServerUrl = args.serverUrl ?? configuration.serverUrl;
     const serverUrl = normalizeFeedbackProxyBaseUrl(rawServerUrl);
     if (serverUrl !== rawServerUrl.replace(/\/$/, '')) {
-        logger.warn(`[genome-feedback] serverUrl has path prefix ("${rawServerUrl}"), normalized to origin "${serverUrl}" for feedback proxy`);
+        logger.warn(`[genome-feedback] serverUrl version suffix stripped ("${rawServerUrl}") → "${serverUrl}" for feedback proxy`);
     }
 
     let response: FetchResponseLike | null = null;
