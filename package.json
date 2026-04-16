@@ -1,6 +1,6 @@
 {
   "name": "aha-agi",
-  "version": "1.0.31",
+  "version": "1.0.32-dev.0",
   "description": "Mobile and Web client for Claude Code and Codex",
   "author": "swmtjy",
   "license": "MIT",
