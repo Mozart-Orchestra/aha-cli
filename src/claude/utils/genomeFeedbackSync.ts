@@ -122,7 +122,9 @@ async function patchFeedback(
 ): Promise<FetchResponseLike> {
     const url = target.genomeId
         ? `${hubUrl}/genomes/id/${encodeURIComponent(target.genomeId)}/feedback`
-        : `${hubUrl}/genomes/${encodeURIComponent(target.namespace)}/${encodeURIComponent(target.name)}/feedback`;
+        : target.version != null
+            ? `${hubUrl}/genomes/${encodeURIComponent(target.namespace)}/${encodeURIComponent(target.name)}/versions/${target.version}/feedback`
+            : `${hubUrl}/genomes/${encodeURIComponent(target.namespace)}/${encodeURIComponent(target.name)}/feedback`;
     return fetchImpl(
         url,
         {

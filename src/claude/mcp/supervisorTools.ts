@@ -1862,6 +1862,7 @@ export function registerSupervisorTools(ctx: McpToolContext): void {
             specId: resolvedSpecId,
             specNamespace,
             specName,
+            specVersion,
         });
 
         writeScore({

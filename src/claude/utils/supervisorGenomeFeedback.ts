@@ -2,6 +2,7 @@ import type { AgentScore } from './scoreStorage';
 
 export interface FeedbackUploadTarget {
     genomeId?: string;
+    version?: number;
     namespace: string;
     name: string;
     source: 'score-spec' | 'explicit-target';
@@ -63,10 +64,12 @@ export function resolveFeedbackUploadTarget(args: {
     specId?: string;
     specNamespace?: string;
     specName?: string;
+    specVersion?: number;
 }): FeedbackUploadTarget | null {
     if (args.specId && args.specNamespace && args.specName) {
         return {
             genomeId: args.specId,
+            version: args.specVersion,
             namespace: args.specNamespace,
             name: args.specName,
             source: 'score-spec',
@@ -75,6 +78,7 @@ export function resolveFeedbackUploadTarget(args: {
 
     if (args.specNamespace && args.specName) {
         return {
+            version: args.specVersion,
             namespace: args.specNamespace,
             name: args.specName,
             source: 'explicit-target',
