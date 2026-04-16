@@ -31,7 +31,6 @@ import {
     getRolePermissions,
     generateRolePrompt,
     isBootstrapRole,
-    isBypassRole,
     isCoordinatorRole,
     KanbanContext
 } from './team/roles';
@@ -563,31 +562,26 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
         // Tier 3 — 工具访问控制
         // Core team tools that EVERY agent must have — kanban, messaging, help.
         // Without these, agents become isolated islands that can't collaborate.
-        const ignoreGenomeToolConstraints = isBypassRole(startupRole, _agentImage) && startupRole === 'supervisor';
+        // NOTE: supervisor v3+ genome explicitly lists all log-query tools it needs
+        // (read_runtime_log, read_cc_log, read_team_log, read_unified_log, etc.).
+        // There is no longer any reason to bypass genome tool constraints for supervisor;
+        // doing so hands governance 158 tools including destructive operations.
         if (_agentImage.allowedTools?.length) {
-            if (ignoreGenomeToolConstraints) {
-                logger.debug('[genome] Ignoring genome allowedTools for supervisor so it can inspect raw logs directly');
-            } else {
-                // Merge mandatory team tools into the genome's allowedTools whitelist
-                // so agents never lose kanban/messaging/help, and spawn-capable genomes
-                // keep create_agent/list_available_agents available.
-                const merged = Array.from(new Set([
-                    ...getInjectedAllowedToolsForAgentImage(_agentImage, {
-                        spawnCapable: canSpawnAgents(startupRole, _agentImage),
-                    }),
-                    ..._agentImage.allowedTools,
-                ]));
-                baselineAllowedTools = merged;
-                logger.debug(`[agent-image] Allowed tools set from agent image (${_agentImage.allowedTools.length} custom + injected team tools = ${merged.length} total)`);
-            }
+            // Merge mandatory team tools into the genome's allowedTools whitelist
+            // so agents never lose kanban/messaging/help, and spawn-capable genomes
+            // keep create_agent/list_available_agents available.
+            const merged = Array.from(new Set([
+                ...getInjectedAllowedToolsForAgentImage(_agentImage, {
+                    spawnCapable: canSpawnAgents(startupRole, _agentImage),
+                }),
+                ..._agentImage.allowedTools,
+            ]));
+            baselineAllowedTools = merged;
+            logger.debug(`[agent-image] Allowed tools set from agent image (${_agentImage.allowedTools.length} custom + injected team tools = ${merged.length} total)`);
         }
         if (_agentImage.disallowedTools?.length) {
-            if (ignoreGenomeToolConstraints) {
-                logger.debug('[genome] Ignoring genome disallowedTools for supervisor so it can inspect raw logs directly');
-            } else {
-                baselineDisallowedTools = _agentImage.disallowedTools;
-                logger.debug(`[genome] Disallowed tools set from genome: ${baselineDisallowedTools.join(', ')}`);
-            }
+            baselineDisallowedTools = _agentImage.disallowedTools;
+            logger.debug(`[genome] Disallowed tools set from genome: ${baselineDisallowedTools.join(', ')}`);
         }
 
         // Always block Claude Code's BUILT-IN team tools — our agents use Aha MCP team tools instead.
