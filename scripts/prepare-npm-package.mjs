@@ -12,7 +12,7 @@ const policy = resolvePublishProtectionPolicy(process.env);
 // ============================================================================
 // Configurable package name support
 // ============================================================================
-const CLI_PACKAGE_NAME = process.env.CLI_PACKAGE_NAME?.trim() || 'aha-agi';
+const CLI_PACKAGE_NAME = process.env.CLI_PACKAGE_NAME?.trim() || 'aha-agi-v2';
 const CLI_BIN_NAME = process.env.CLI_BIN_NAME?.trim() || 'aha';
 const CLI_BIN_MCP_NAME = process.env.CLI_BIN_MCP_NAME?.trim() || 'aha-mcp';
 
