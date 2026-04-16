@@ -1762,9 +1762,13 @@ export function registerSupervisorTools(ctx: McpToolContext): void {
                     resolvedSpecId = member.specId;
                     logger.debug(`[score_agent] Auto-resolved specId=${resolvedSpecId} from team member record for session ${args.sessionId}`);
                 }
-            } catch {
-                // team lookup failed — proceed without specId
+            } catch (err) {
+                logger.error(`[score_agent] Failed to auto-resolve specId from team member record for session ${args.sessionId}: ${err instanceof Error ? err.message : String(err)}`);
             }
+
+        if (!resolvedSpecId) {
+            logger.warn(`[score_agent] No specId resolved for session ${args.sessionId} — feedback will use namespace+name fallback (may cause version mixing)`);
+        }
         }
 
         const { lookupSessionGenome } = await import('@/claude/utils/sessionGenomeMap');
@@ -1784,7 +1788,9 @@ export function registerSupervisorTools(ctx: McpToolContext): void {
                     specName = data.genome?.name ?? undefined;
                     specVersion ??= data.genome?.version;
                 }
-            } catch { /* proceed without */ }
+            } catch (err) {
+                logger.error(`[score_agent] Failed to resolve specId namespace/name from genome-hub for ${resolvedSpecId}: ${err instanceof Error ? err.message : String(err)}`);
+            }
         }
 
         // ── Auto-extract tokensUsed from CC log when not provided ─────
