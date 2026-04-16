@@ -39,6 +39,7 @@ export class PermissionHandler {
     private pendingRequests = new Map<string, PendingRequest>();
     private session: Session;
     private allowedTools = new Set<string>();
+    private disallowedTools = new Set<string>();
     private allowedBashLiterals = new Set<string>();
     private allowedBashPrefixes = new Set<string>();
     private permissionMode: PermissionMode = 'default';
@@ -58,6 +59,10 @@ export class PermissionHandler {
 
     handleModeChange(mode: PermissionMode) {
         this.permissionMode = mode;
+    }
+
+    handleDisallowedToolsUpdate(tools: string[]) {
+        this.disallowedTools = new Set(tools);
     }
 
     /**
@@ -142,6 +147,11 @@ export class PermissionHandler {
         //
 
         if (this.permissionMode === 'bypassPermissions') {
+            // bypassPermissions auto-approves without human interaction,
+            // but genome governance constraints (disallowedTools) are still enforced.
+            if (this.disallowedTools.has(toolName)) {
+                return { behavior: 'deny', message: `Tool ${toolName} is disallowed by genome governance.` };
+            }
             return { behavior: 'allow', updatedInput: input as Record<string, unknown> };
         }
 

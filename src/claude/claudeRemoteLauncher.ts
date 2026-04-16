@@ -653,6 +653,9 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
                             let p = pending;
                             pending = null;
                             permissionHandler.handleModeChange(p.mode.permissionMode);
+                            if (p.mode.disallowedTools?.length) {
+                                permissionHandler.handleDisallowedToolsUpdate(p.mode.disallowedTools);
+                            }
                             return p;
                         }
 
@@ -668,6 +671,9 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
                             modeHash = msg.hash;
                             mode = msg.mode;
                             permissionHandler.handleModeChange(mode.permissionMode);
+                            if (mode.disallowedTools?.length) {
+                                permissionHandler.handleDisallowedToolsUpdate(mode.disallowedTools);
+                            }
                             return {
                                 message: msg.message,
                                 mode: msg.mode
