@@ -373,6 +373,12 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
                                 exitReason = 'exit';
                             }
                             abort().catch(() => {});
+                            // Bypass agents (supervisor/help-agent) hold open WebSocket/daemon
+                            // handles that prevent the Node.js process from exiting after the
+                            // SDK loop ends. Force-exit 3s after abort() to guarantee OS-level
+                            // process termination when retire_self() or AHA_LIFECYCLE retire
+                            // is emitted.
+                            setTimeout(() => process.exit(0), 3000);
                         })();
                     }, 2000);
                 }
