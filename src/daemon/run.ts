@@ -814,6 +814,20 @@ export async function startDaemon(): Promise<void> {
             sessions: pidToTrackedSession.values(),
             state: helpAutoSpawnState,
             requestHelp,
+            serverHelpCountFn: async (teamId: string): Promise<number> => {
+              try {
+                const result = await api.getTeam(teamId);
+                if (!result) return 0;
+                const members = result.team.members ?? [];
+                return members.filter(
+                  (m: Record<string, unknown>) =>
+                    (typeof m.role === 'string' && m.role === 'help-agent') ||
+                    (typeof m.roleId === 'string' && m.roleId === 'help-agent')
+                ).length;
+              } catch {
+                return 0;
+              }
+            },
           });
         }
       } catch (error) {

@@ -87,8 +87,12 @@ export const TOOL_GRANT_ROLES = ['supervisor', 'master'] as const;
 /** Roles that can respawn / replace agents. */
 export const AGENT_REPLACE_ROLES = ['supervisor', 'master', 'help-agent', 'org-manager'] as const;
 
-/** Roles that can read team logs, CC logs, and runtime logs (observation-only, no mutation). */
-export const SUPERVISOR_OBSERVATION_ROLES = ['supervisor', 'help-agent', 'org-manager', 'master'] as const;
+/** Roles that can read team logs, CC logs, runtime logs, git diff, and other observation tools (read-only). */
+export const SUPERVISOR_OBSERVATION_ROLES = [
+    'supervisor', 'help-agent', 'org-manager', 'master',
+    'engineering-reviewer', 'security-reviewer', 'qa-commander', 'builder',
+    'security-officer',
+] as const;
 
 /** Roles that can inspect genome specs for QA/review purposes (read-only, limited to non-private namespaces). */
 export const QA_INSPECTOR_ROLES = ['qa-engineer', 'qa', 'engineering-code-reviewer'] as const;

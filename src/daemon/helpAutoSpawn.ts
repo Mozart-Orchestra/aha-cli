@@ -62,6 +62,7 @@ export type RequestHelpFn = (params: {
 /** Session shape expected by countActiveHelpAgents (subset of TrackedSession). */
 interface SessionWithMeta {
   ahaSessionMetadataFromLocalWebhook?: Metadata;
+  pid?: number;
 }
 
 // ── Factory ───────────────────────────────────────────────────────────────────
@@ -148,6 +149,9 @@ export function countActiveHelpAgents(
  * @param params.sessions         - Live session map values for pool counting.
  * @param params.state            - Mutable per-team debounce/check-cursor state.
  * @param params.requestHelp      - Callback to spawn/reuse a help-agent.
+ * @param params.serverHelpCountFn - Optional async fn that queries server for help-agent
+ *                                   count per team. When provided, pool cap uses
+ *                                   max(localCount, serverCount) for dual-source defense.
  * @param params.poolMax          - Max concurrent help-agents per team (default 2).
  * @param params.debounceMs       - Min ms between spawns per team (default 60 000).
  * @param params.cwd              - Working directory for .aha/teams/ (default process.cwd()).
@@ -158,6 +162,7 @@ export async function checkHelpAutoSpawn(params: {
   sessions: Iterable<SessionWithMeta>;
   state: HelpAutoSpawnState;
   requestHelp: RequestHelpFn;
+  serverHelpCountFn?: (teamId: string) => Promise<number>;
   poolMax?: number;
   debounceMs?: number;
   cwd?: string;
@@ -168,6 +173,7 @@ export async function checkHelpAutoSpawn(params: {
     sessions,
     state,
     requestHelp,
+    serverHelpCountFn,
   } = params;
   const poolMax = params.poolMax ?? HELP_POOL_MAX;
   const debounceMs = params.debounceMs ?? HELP_DEBOUNCE_MS;
@@ -192,8 +198,28 @@ export async function checkHelpAutoSpawn(params: {
 
     if (!hasHelpRequest) continue;
 
-    // Pool cap check
-    const activeHelpCount = countActiveHelpAgents(sessions, teamId);
+    // Pool cap check — dual-source: take max of local session tracking and server roster
+    const localHelpCount = countActiveHelpAgents(sessions, teamId);
+    let activeHelpCount = localHelpCount;
+
+    if (serverHelpCountFn) {
+      try {
+        const serverHelpCount = await serverHelpCountFn(teamId);
+        if (serverHelpCount > localHelpCount) {
+          activeHelpCount = serverHelpCount;
+          logger.debug(
+            `[HELP AUTO SPAWN] Server reports more help-agents (${serverHelpCount}) ` +
+            `than local tracking (${localHelpCount}) for team ${teamId} — using server count`
+          );
+        }
+      } catch (err) {
+        logger.debug(
+          `[HELP AUTO SPAWN] Server roster check failed for team ${teamId}, ` +
+          `falling back to local count: ${err}`
+        );
+      }
+    }
+
     if (activeHelpCount >= poolMax) {
       logger.debug(
         `[HELP AUTO SPAWN] @help detected for team ${teamId} but pool is full ` +
@@ -204,7 +230,7 @@ export async function checkHelpAutoSpawn(params: {
 
     logger.debug(
       `[HELP AUTO SPAWN] @help detected for team ${teamId} ` +
-      `(${activeHelpCount} active, max ${poolMax}) — spawning help-agent`
+      `(local=${localHelpCount}, effective=${activeHelpCount}, max ${poolMax}) — spawning help-agent`
     );
 
     // Record spawn time before the async call to prevent parallel triggers
