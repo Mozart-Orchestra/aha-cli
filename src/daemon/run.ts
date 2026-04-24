@@ -819,13 +819,21 @@ export async function startDaemon(): Promise<void> {
                 const result = await api.getTeam(teamId);
                 if (!result) return 0;
                 const members = result.team.members ?? [];
+                // Only count members from this daemon lifecycle to avoid stale entries
+                const cutoff = (initialDaemonState.startedAt ?? Date.now()) - 30_000;
                 return members.filter(
                   (m: Record<string, unknown>) => {
                     const isHelpAgent =
                       (typeof m.role === 'string' && m.role === 'help-agent') ||
                       (typeof m.roleId === 'string' && m.roleId === 'help-agent');
                     if (!isHelpAgent) return false;
-                    if ('runStatus' in m && typeof m.runStatus === 'string' && m.runStatus !== 'active') return false;
+                    // Filter out dead/explicitly inactive members
+                    if ('lifecycle' in m && typeof m.lifecycle === 'string') {
+                      const lc = m.lifecycle.toLowerCase();
+                      if (lc === 'dead' || lc === 'retired' || lc === 'exited') return false;
+                    }
+                    // Filter out stale entries from before this daemon started
+                    if (typeof m.joinedAt === 'number' && m.joinedAt < cutoff) return false;
                     return true;
                   }
                 ).length;
