@@ -301,17 +301,17 @@ User interface components.
 - Testing: Vitest 
 
 
-## 🔴 Org-Manager 系统级工具制约（2026-03-21，待解决）
+## ✅ Org-Manager 系统级工具（2026-03-22 已实现）
 
-> 解决后从本节移除。
+> 三个工具全部已实现（commit 92c3e7f），位于 `supervisorTools.ts`。
 
-### 待实现工具
+### 已实现工具
 
-1. **`restart_daemon`** MCP tool — 修改 aha-cli 源码（controlServer.ts, supervisorTools.ts, mcpContext.ts, run.ts）后，agent 无法让变更生效，需手动重启 daemon。建议实现 graceful restart MCP tool。（优先级：高）
+1. **`restart_daemon`** — `supervisorTools.ts:4041` — Graceful restart with resource pre-check。org-manager/supervisor/help-agent 可用。
 
-2. **`tsc_check(path)`** MCP tool — aha-cli 需要 Node 22（`.node-version=22`），当前 shell 默认 Node 24 下 tsc OOM crash。需要一个工具自动 `fnm use` 读取 `.node-version` 后执行 tsc。（优先级：高）
+2. **`tsc_check(path)`** — `supervisorTools.ts:4134` — 自动 `fnm use` + `--max-old-space-size=8192`，ResourceGovernor 互斥槽，所有角色可用。
 
-3. **`git_diff_summary`** — supervisor 评分只看 CC log，不读 git diff。org-manager 修复 P0 级 daemon 问题但被评 45/100。supervisor 应能看到代码变更的范围和影响。（优先级：中）
+3. **`git_diff_summary`** — `supervisorTools.ts:4202` — 变更文件列表 + 行数统计 + commit log，supervisor/help-agent/org-manager 可用。
 
 ### Node 环境注意事项
 
