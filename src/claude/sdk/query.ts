@@ -308,12 +308,9 @@ export function query(config: {
     if (permissionMode) args.push('--permission-mode', permissionMode)
     if (settingsPath) args.push('--settings', settingsPath)
 
-    if (fallbackModel) {
-        if (model && fallbackModel === model) {
-            throw new Error('Fallback model cannot be the same as the main model. Please specify a different model for fallbackModel option.')
-        }
-        args.push('--fallback-model', fallbackModel)
-    }
+    // PROHIBITED: --fallback-model is never passed to Claude Code CLI.
+    // User directive: fallback-model causes unintended model consumption (e.g. glm-4.7 via cc switch).
+    // The fallbackModel param is kept in the signature for API compat but intentionally ignored.
 
     // Handle prompt input
     if (typeof prompt === 'string') {

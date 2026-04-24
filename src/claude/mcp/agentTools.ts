@@ -840,6 +840,21 @@ The \`prompt\` field is injected as the agent's initial task context. Write it a
                     isError: false,
                 };
             }
+            // Model ID whitelist: only Claude model IDs are allowed to prevent
+            // accidental cost leakage via non-anthropic providers (e.g. glm-*).
+            const ALLOWED_MODEL_PREFIX = 'claude-';
+            if (!args.modelId.startsWith(ALLOWED_MODEL_PREFIX)) {
+                return {
+                    content: [{ type: 'text', text: `Error: modelId must start with '${ALLOWED_MODEL_PREFIX}'. Got '${args.modelId}'. Use modelRouter for non-anthropic providers.` }],
+                    isError: true,
+                };
+            }
+            if (args.fallbackModelId && !args.fallbackModelId.startsWith(ALLOWED_MODEL_PREFIX)) {
+                return {
+                    content: [{ type: 'text', text: `Error: fallbackModelId must start with '${ALLOWED_MODEL_PREFIX}'. Got '${args.fallbackModelId}'.` }],
+                    isError: true,
+                };
+            }
             const nextMetadata = {
                 ...session.metadata,
                 modelOverride: args.modelId,
