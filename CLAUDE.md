@@ -301,17 +301,117 @@ User interface components.
 - Testing: Vitest 
 
 
-## ✅ Org-Manager 系统级工具（2026-03-22 已实现）
+## ✅ 已实现 MCP 工具清单
 
-> 三个工具全部已实现（commit 92c3e7f），位于 `supervisorTools.ts`。
+> 防止 knowledge gap：所有 agent 启动时可见此清单，不需要调查"是否已实现"。
+> 来源：`src/claude/mcp/` 下 6 个工具文件，按类别分组。
 
-### 已实现工具
+### 任务管理 (`taskTools.ts`)
 
-1. **`restart_daemon`** — `supervisorTools.ts:4041` — Graceful restart with resource pre-check。org-manager/supervisor/help-agent 可用。
+| 工具 | 用途 | 权限 |
+|------|------|------|
+| `create_task` | 创建团队任务 | TASK_CREATE_ROLES (master, orchestrator) |
+| `update_task` | 更新任务状态/描述 | 任务 owner 或 TASK_CREATE_ROLES |
+| `add_task_comment` | 添加任务评论/备忘 | 所有角色 |
+| `delete_task` | 删除任务 | TASK_CREATE_ROLES |
+| `list_tasks` | 列出看板任务 | 所有角色 |
+| `get_task` | 获取任务详情 | 所有角色 |
+| `create_subtask` | 创建子任务 | 所有角色 |
+| `list_subtasks` | 列出子任务 | 所有角色 |
+| `start_task` | 开始任务 | 所有角色 |
+| `complete_task` | 完成任务 | 所有角色 |
+| `report_blocker` | 报告阻塞 | 所有角色 |
+| `resolve_blocker` | 解除阻塞 | 所有角色 |
+| `release_task_locks` | 释放任务锁 | daemon 内部 |
 
-2. **`tsc_check(path)`** — `supervisorTools.ts:4134` — 自动 `fnm use` + `--max-old-space-size=8192`，ResourceGovernor 互斥槽，所有角色可用。
+### 团队通信 (`teamTools.ts`)
 
-3. **`git_diff_summary`** — `supervisorTools.ts:4202` — 变更文件列表 + 行数统计 + commit log，supervisor/help-agent/org-manager 可用。
+| 工具 | 用途 | 权限 |
+|------|------|------|
+| `send_team_message` | 发送团队消息 | 所有角色 |
+| `get_team_info` | 获取团队信息 | 所有角色 |
+| `get_legion_view` | 获取军团视图 | 所有角色 |
+| `list_inactive_team_members` | 列出非活跃成员 | 所有角色 |
+| `get_team_pulse` | 团队心跳状态 | 所有角色 |
+
+### Agent 管理 (`agentTools.ts`)
+
+| 工具 | 用途 | 权限 |
+|------|------|------|
+| `list_available_agents` | 列出可用 agent spec | 所有角色 |
+| `create_agent` | Spawn 新 agent | 所有角色 |
+| `list_team_agents` | 列出团队在线 agent | 所有角色 |
+| `update_agent_model` | 更新 agent 模型 | 所有角色 |
+| `grant_tool_access` | 授予临时工具权限 | TOOL_GRANT_ROLES (supervisor, master) |
+| `revoke_tool_access` | 撤销临时工具权限 | TOOL_GRANT_ROLES |
+| `evaluate_replacement_votes` | 评估替换投票 | 所有角色 |
+| `get_team_config` | 获取团队配置 | 所有角色 |
+| `replace_agent` | 替换 agent | AGENT_REPLACE_ROLES (supervisor, master, help-agent, org-manager) |
+| `batch_spawn_agents` | 批量 spawn | 所有角色 |
+
+### 进化系统 (`evolutionTools.ts`)
+
+| 工具 | 用途 | 权限 |
+|------|------|------|
+| `request_help` | 请求 help-agent | 所有角色 |
+| `create_genome` | 创建 genome spec | GENOME_EDIT_ROLES |
+| `create_corps` | 创建军团 genome | GENOME_EDIT_ROLES |
+| `update_genome` | 更新 genome spec | GENOME_EDIT_ROLES |
+
+### 监督/观察 (`supervisorTools.ts`)
+
+| 工具 | 用途 | 权限 |
+|------|------|------|
+| `read_team_log` | 读团队消息日志 | SUPERVISOR_OBSERVATION_ROLES |
+| `get_context_status` | 上下文窗口状态 | 所有角色 |
+| `get_host_health` | 主机资源状态 | 所有角色 |
+| `get_self_view` | 自身 session 信息 | 所有角色 |
+| `list_visible_tools` | 列出可见工具 | 所有角色 |
+| `explain_tool_access` | 解释工具权限逻辑 | 所有角色 |
+| `get_effective_permissions` | 获取有效权限 | 所有角色 |
+| `get_genome_spec` | 获取 genome spec | 所有角色（私有 namespace 受限） |
+| `read_cc_log` | 读 Claude Code 日志 | SUPERVISOR_OBSERVATION_ROLES |
+| `score_agent` | 评分 agent | SCORING_ROLES |
+| `update_genome_feedback` | 上传评分反馈 | SCORING_ROLES |
+| `evolve_genome` | 进化 genome | GENOME_EDIT_ROLES |
+| `mutate_genome` | 突变 genome | GENOME_EDIT_ROLES |
+| `compare_genome_versions` | 比较 genome 版本 | GENOME_EDIT_ROLES |
+| `rollback_genome` | 回滚 genome | GENOME_EDIT_ROLES |
+| `update_team_feedback` | 更新团队反馈 | SCORING_ROLES |
+| `compact_agent` | 压缩 agent 上下文 | supervisor, help-agent, master |
+| `kill_agent` | 终止 agent | supervisor, help-agent, master, org-manager |
+| `archive_session` | 归档 session | supervisor, help-agent, master, org-manager |
+| `retire_self` | 退休自身 | 所有角色 |
+| `recover_session` | 恢复 session | supervisor, help-agent, master |
+| `list_team_runtime_logs` | 列出运行时日志 | SUPERVISOR_OBSERVATION_ROLES |
+| `read_runtime_log` | 读运行时日志 | SUPERVISOR_OBSERVATION_ROLES |
+| `list_team_cc_logs` | 列出 CC 日志 | SUPERVISOR_OBSERVATION_ROLES |
+| `save_supervisor_state` | 保存 supervisor 状态 | SUPERVISOR_OBSERVATION_ROLES |
+| `score_supervisor_self` | supervisor 自评 | SCORING_ROLES |
+| `restart_daemon` | 重启 daemon | supervisor, help-agent, org-manager |
+| `tsc_check` | TypeScript 类型检查 | 所有角色 |
+| `git_diff_summary` | Git 变更摘要 | SUPERVISOR_OBSERVATION_ROLES |
+| `read_unified_log` | 统一日志查询 | SUPERVISOR_OBSERVATION_ROLES |
+
+### 上下文/记忆 (`contextTools.ts`)
+
+| 工具 | 用途 | 权限 |
+|------|------|------|
+| `update_context` | 更新上下文状态 | 所有角色 |
+| `remember` | 保存记忆 | 所有角色 |
+| `recall` | 回忆记忆 | 所有角色 |
+| `change_title` | 修改会话标题 | 所有角色 |
+
+### RBAC 常量速查
+
+| 常量 | 角色 | 定义位置 |
+|------|------|----------|
+| TASK_CREATE_ROLES | master, orchestrator | roleConstants.ts:82 |
+| TOOL_GRANT_ROLES | supervisor, master | roleConstants.ts:85 |
+| AGENT_REPLACE_ROLES | supervisor, master, help-agent, org-manager | roleConstants.ts:88 |
+| SCORING_ROLES | supervisor, help-agent, master, orchestrator, org-manager | roleConstants.ts:77 |
+| GENOME_EDIT_ROLES | supervisor, org-manager, agent-builder, master, help-agent | roleConstants.ts:79 |
+| SUPERVISOR_OBSERVATION_ROLES | supervisor, help-agent, org-manager, master, engineering-reviewer, security-reviewer, qa-commander, builder, security-officer | roleConstants.ts:91 |
 
 ### Node 环境注意事项
 
