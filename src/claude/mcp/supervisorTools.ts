@@ -3521,7 +3521,45 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
                 body: JSON.stringify({ sessionId: args.sessionId }),
                 signal: AbortSignal.timeout(10_000),
             });
-            await response.json();
+            const result = await response.json() as { success?: boolean };
+
+            // OS-level fallback: if daemon doesn't track the session (e.g. after restart),
+            // find the process by matching the session ID in the command line and kill it.
+            if (!result.success) {
+                logger.debug(`[kill_agent] Daemon stop-session returned false for ${args.sessionId}, attempting OS-level fallback`);
+                try {
+                    const { execSync } = await import('node:child_process');
+                    // Find PIDs whose command line contains the session ID (aha-agi session tag)
+                    const psOutput = execSync(
+                        `ps aux | grep -E 'dist/index.mjs|aha.mjs' | grep '${args.sessionId}' | grep -v grep || true`,
+                        { timeout: 5_000, encoding: 'utf-8' },
+                    );
+                    const lines = psOutput.trim().split('\n').filter(Boolean);
+                    if (lines.length === 0) {
+                        return { content: [{ type: 'text', text: `Session ${args.sessionId} not found in daemon tracking or OS process list. May have already exited.` }], isError: true };
+                    }
+                    const pids = lines.map(line => line.trim().split(/\s+/)[1]).filter(Boolean);
+                    let killed = 0;
+                    for (const pidStr of pids) {
+                        const pid = parseInt(pidStr, 10);
+                        if (isNaN(pid) || pid <= 1) continue;
+                        try {
+                            process.kill(pid, 'SIGTERM');
+                            killed++;
+                            logger.debug(`[kill_agent] OS fallback: sent SIGTERM to PID ${pid} for session ${args.sessionId}`);
+                        } catch {
+                            // PID may have exited between ps and kill
+                        }
+                    }
+                    if (killed > 0) {
+                        return { content: [{ type: 'text', text: `Killed ${args.sessionId} via OS fallback (PID${pids.length > 1 ? 's' : ''} ${pids.join(', ')}): ${args.reason}` }], isError: false };
+                    }
+                    return { content: [{ type: 'text', text: `Session ${args.sessionId} found in ps but all PIDs already dead.` }], isError: true };
+                } catch (fallbackErr) {
+                    logger.debug(`[kill_agent] OS fallback failed: ${fallbackErr}`);
+                    return { content: [{ type: 'text', text: `Daemon stop failed and OS fallback failed for ${args.sessionId}: ${String(fallbackErr)}` }], isError: true };
+                }
+            }
             return { content: [{ type: 'text', text: `Killed ${args.sessionId}: ${args.reason}` }], isError: false };
         } catch (error) {
             return { content: [{ type: 'text', text: `Error: ${String(error)}` }], isError: true };
