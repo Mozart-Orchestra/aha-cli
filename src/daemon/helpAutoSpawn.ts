@@ -121,6 +121,16 @@ export function countActiveHelpAgents(
     const meta = s.ahaSessionMetadataFromLocalWebhook;
     const sessionTeamId = meta?.teamId ?? meta?.roomId;
     if (sessionTeamId === teamId && meta?.role === 'help-agent') {
+      // Verify PID is still alive — kill(pid, 0) is a liveness check, not a kill.
+      // Without this, a killed-but-undead process stays in pidToTrackedSession
+      // while the auto-spawner sees count=0 and bypasses HELP_POOL_MAX.
+      if (s.pid) {
+        try {
+          process.kill(s.pid, 0);
+        } catch {
+          continue; // PID is dead, don't count it
+        }
+      }
       count++;
     }
   }

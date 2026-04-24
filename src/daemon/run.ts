@@ -67,6 +67,7 @@ import {
   stopTeamSessions,
   requestHelp,
   recoverExistingSessions,
+  signalRecoveryComplete,
   onHeartbeatPrunedSession,
 } from './sessionManager';
 
@@ -874,6 +875,7 @@ export async function startDaemon(): Promise<void> {
     if (recoveredCount > 0) {
       logger.debug(`[DAEMON RUN] Recovered ${recoveredCount} sessions from previous daemon instance`);
     }
+    signalRecoveryComplete();
 
     const shutdownRequest = await resolvesWhenShutdownRequested;
     await cleanupAndShutdown(shutdownRequest.source, shutdownRequest.errorMessage);

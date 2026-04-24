@@ -53,6 +53,20 @@ import { seedCodexHomeConfig, seedCodexHomeSkillUnion } from '@/codex/codexHome'
  * without duplicating the map reference.
  */
 export const pidToTrackedSession = new Map<number, TrackedSession>();
+
+/**
+ * Recovery gate: spawn and help-auto-spawn must wait until recoverExistingSessions()
+ * completes. Without this gate, daemon restart leaves pidToTrackedSession empty and
+ * pool-limit checks (HELP_POOL_MAX, supervisor count) are bypassed.
+ */
+let recoveryResolve: (() => void) | null = null;
+export const recoveryComplete = new Promise<void>((resolve) => {
+    recoveryResolve = resolve;
+});
+export function signalRecoveryComplete(): void {
+    recoveryResolve?.();
+    recoveryResolve = null;
+}
 const inFlightHelpRequestsByTeam = new Map<string, Promise<{ success: boolean; helpAgentSessionId?: string; reused?: boolean; saturated?: boolean; error?: string }>>();
 const helpAgentLeaseExpiryByTeam = new Map<string, Map<string, number>>();
 const HELP_AGENT_POOL_MAX = 2;
@@ -818,6 +832,9 @@ const spawnSessionInternal = async (options: SpawnSessionOptions): Promise<Spawn
   }
 
   try {
+    // Wait for recovery so pool-limit checks have accurate counts after daemon restart.
+    await recoveryComplete;
+
     let extraEnv: Record<string, string> = {};
 
     if (options.agent === 'codex') {
@@ -1200,6 +1217,9 @@ export const requestHelp = async (params: {
   }
 
   const requestPromise = (async () => {
+    // Wait for recovery to complete so pool count is accurate after daemon restart.
+    await recoveryComplete;
+
     const activeHelpAgents = Array.from(pidToTrackedSession.values())
       .filter((session) => {
         const metadata = session.ahaSessionMetadataFromLocalWebhook;
@@ -1259,6 +1279,7 @@ export const requestHelp = async (params: {
         teamId,
         role: 'help-agent',
         sessionName: 'Help Agent',
+        sessionTag: `team:${teamId}:member:help-${Date.now()}`,
         executionPlane: 'bypass',
         env: {
           AHA_HELP_TARGET_SESSION: targetSessionId,
