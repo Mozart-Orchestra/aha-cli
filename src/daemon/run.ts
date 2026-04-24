@@ -819,24 +819,28 @@ export async function startDaemon(): Promise<void> {
                 const result = await api.getTeam(teamId);
                 if (!result) return 0;
                 const members = result.team.members ?? [];
-                // Only count members from this daemon lifecycle to avoid stale entries
-                const cutoff = (initialDaemonState.startedAt ?? Date.now()) - 30_000;
-                return members.filter(
-                  (m: Record<string, unknown>) => {
-                    const isHelpAgent =
-                      (typeof m.role === 'string' && m.role === 'help-agent') ||
-                      (typeof m.roleId === 'string' && m.roleId === 'help-agent');
-                    if (!isHelpAgent) return false;
-                    // Filter out dead/explicitly inactive members
-                    if ('lifecycle' in m && typeof m.lifecycle === 'string') {
-                      const lc = m.lifecycle.toLowerCase();
-                      if (lc === 'dead' || lc === 'retired' || lc === 'exited') return false;
-                    }
-                    // Filter out stale entries from before this daemon started
-                    if (typeof m.joinedAt === 'number' && m.joinedAt < cutoff) return false;
-                    return true;
+                // Cross-reference server roster with local PID tracking.
+                // Only count help-agents whose sessionId is tracked locally AND PID is alive.
+                // After daemon restart, pidToTrackedSession is empty → count=0 → can spawn.
+                // Stale server entries (dead sessions) are excluded because they have no local tracking.
+                let count = 0;
+                for (const m of members as Record<string, unknown>[]) {
+                  const isHelpAgent =
+                    (typeof m.role === 'string' && m.role === 'help-agent') ||
+                    (typeof m.roleId === 'string' && m.roleId === 'help-agent');
+                  if (!isHelpAgent) continue;
+                  const sid = typeof m.sessionId === 'string' ? m.sessionId : undefined;
+                  if (!sid) continue;
+                  const tracked = pidToTrackedSession.get(sid);
+                  if (!tracked?.pid) continue;
+                  try {
+                    process.kill(tracked.pid, 0);
+                    count++;
+                  } catch {
+                    // PID dead — don't count
                   }
-                ).length;
+                }
+                return count;
               } catch {
                 return 0;
               }
