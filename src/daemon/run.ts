@@ -74,7 +74,7 @@ import {
 import { runHeartbeatCycle } from './heartbeat';
 import { runSupervisorCycle, collectLiveMainlineSessionIdsByTeam } from './supervisorScheduler';
 import { shouldUsePidHeartbeat } from './heartbeatPolicy';
-import { checkHelpAutoSpawn, createHelpAutoSpawnState } from './helpAutoSpawn';
+import { checkHelpAutoSpawn, createHelpAutoSpawnState, markRecoveryComplete } from './helpAutoSpawn';
 import { runAnomalyDetection } from './anomalyDetector';
 
 // Prepare initial metadata — use configuration.currentCliVersion (reads from disk)
@@ -923,6 +923,7 @@ export async function startDaemon(): Promise<void> {
       logger.debug(`[DAEMON RUN] Recovered ${recoveredCount} sessions from previous daemon instance`);
     }
     signalRecoveryComplete();
+    markRecoveryComplete(helpAutoSpawnState);
 
     const shutdownRequest = await resolvesWhenShutdownRequested;
     await cleanupAndShutdown(shutdownRequest.source, shutdownRequest.errorMessage);

@@ -57,6 +57,10 @@ export interface McpToolContext {
     containsHelpMention: (content: string) => boolean;
     listDaemonTrackedSessions: () => Promise<Array<{ ahaSessionId: string; pid: number }>>;
     getDaemonTrackedSessionIds: () => Promise<Set<string>>;
+    listDaemonPoolStatus: () => Promise<{
+        sessions: Array<{ ahaSessionId: string; pid: number; pidAlive: boolean; role: string | null; teamId: string | null }>;
+        poolCounts: Record<string, { alive: number; dead: number; total: number }>;
+    }>;
     getTeamMemberRecord: (teamId: string, sessionId: string) => Promise<any | null>;
     parseVoteDecision: (content: string) => VoteDecision | null;
     evaluateReplacementVotes: (params: {
@@ -235,6 +239,29 @@ export function buildMcpHelpers(
     const getDaemonTrackedSessionIds = async (): Promise<Set<string>> => {
         const trackedSessions = await listDaemonTrackedSessions();
         return new Set(trackedSessions.map((session) => session.ahaSessionId));
+    };
+
+    const listDaemonPoolStatus = async (): Promise<{
+        sessions: Array<{ ahaSessionId: string; pid: number; pidAlive: boolean; role: string | null; teamId: string | null }>;
+        poolCounts: Record<string, { alive: number; dead: number; total: number }>;
+    }> => {
+        const state = await readDaemonState();
+        if (!state?.httpPort) {
+            return { sessions: [], poolCounts: {} };
+        }
+        const response = await fetch(`http://127.0.0.1:${state.httpPort}/pool-status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: AbortSignal.timeout(5_000),
+        });
+        const result = await response.json() as {
+            sessions?: Array<{ ahaSessionId: string; pid: number; pidAlive: boolean; role: string | null; teamId: string | null }>;
+            poolCounts?: Record<string, { alive: number; dead: number; total: number }>;
+        };
+        return {
+            sessions: Array.isArray(result.sessions) ? result.sessions : [],
+            poolCounts: result.poolCounts ?? {},
+        };
     };
 
     const parseVoteDecision = (content: string): VoteDecision | null => {
@@ -750,6 +777,7 @@ export function buildMcpHelpers(
         containsHelpMention,
         listDaemonTrackedSessions,
         getDaemonTrackedSessionIds,
+        listDaemonPoolStatus,
         parseVoteDecision,
         getTeamMemberRecord,
         evaluateReplacementVotes,

@@ -238,6 +238,66 @@ export function startDaemonControlServer({
       return { sessions };
     });
 
+    // Pool status — returns all tracked sessions with role, teamId, PID liveness, and pool counts per role.
+    typed.post('/pool-status', {
+      schema: {
+        response: {
+          200: z.object({
+            sessions: z.array(z.object({
+              ahaSessionId: z.string(),
+              pid: z.number(),
+              pidAlive: z.boolean(),
+              role: z.string().nullable(),
+              teamId: z.string().nullable(),
+            })),
+            poolCounts: z.record(z.string(), z.object({
+              alive: z.number(),
+              dead: z.number(),
+              total: z.number(),
+            })),
+          }),
+        },
+      },
+    }, async () => {
+      const children = getChildren();
+      const sessions = children
+        .filter(child => Boolean(child.ahaSessionId))
+        .map(child => {
+          const meta = child.ahaSessionMetadataFromLocalWebhook;
+          const role = meta?.role ?? null;
+          const teamId = meta?.teamId ?? meta?.roomId ?? null;
+          let pidAlive = false;
+          try {
+            process.kill(child.pid, 0);
+            pidAlive = true;
+          } catch { /* PID dead */ }
+          return {
+            ahaSessionId: child.ahaSessionId!,
+            pid: child.pid,
+            pidAlive,
+            role,
+            teamId,
+          };
+        });
+
+      const poolCounts: Record<string, { alive: number; dead: number; total: number }> = {};
+      for (const s of sessions) {
+        if (!s.role) continue;
+        if (!poolCounts[s.role]) {
+          poolCounts[s.role] = { alive: 0, dead: 0, total: 0 };
+        }
+        poolCounts[s.role].total++;
+        if (s.pidAlive) {
+          poolCounts[s.role].alive++;
+        } else {
+          poolCounts[s.role].dead++;
+        }
+      }
+
+      logger.debug(`[CONTROL SERVER] Pool status: ${sessions.length} sessions, ${Object.keys(poolCounts).length} roles`);
+      return { sessions, poolCounts };
+    });
+
     typed.post('/channels/status', {
       schema: {
         response: {

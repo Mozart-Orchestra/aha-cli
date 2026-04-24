@@ -22,6 +22,8 @@ import { containsHelpMention } from '@/claude/team/helpLane';
 
 export const HELP_POOL_MAX = 2;
 export const HELP_DEBOUNCE_MS = 60_000;
+/** Warm-up period after recovery before auto-spawn is allowed (ms). */
+export const HELP_RECOVERY_WARMUP_MS = 60_000;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -50,6 +52,12 @@ export interface HelpAutoSpawnState {
    * Defaults to 0 (read all history) when not provided.
    */
   initialNow: number;
+  /**
+   * Timestamp (ms) when session recovery completed. null if not yet completed.
+   * Auto-spawn is blocked until `recoveryCompletedAt + HELP_RECOVERY_WARMUP_MS`
+   * to give pidToTrackedSession time to stabilize after daemon restart.
+   */
+  recoveryCompletedAt: number | null;
 }
 
 export type RequestHelpFn = (params: {
@@ -78,7 +86,13 @@ export function createHelpAutoSpawnState(initialNow?: number): HelpAutoSpawnStat
     lastCheckedTsByTeam: new Map(),
     lastSpawnTsByTeam: new Map(),
     initialNow: initialNow ?? 0,
+    recoveryCompletedAt: null,
   };
+}
+
+/** Mark recovery as complete. Called from run.ts after signalRecoveryComplete(). */
+export function markRecoveryComplete(state: HelpAutoSpawnState): void {
+  state.recoveryCompletedAt = Date.now();
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -186,6 +200,19 @@ export async function checkHelpAutoSpawn(params: {
   const debounceMs = params.debounceMs ?? HELP_DEBOUNCE_MS;
   const cwd = params.cwd ?? process.cwd();
   const now = params.now ?? Date.now();
+
+  // Recovery warm-up gate: skip auto-spawn until recovery + warmup period elapses.
+  // This prevents spawn overflow during the window between daemon start and
+  // pidToTrackedSession being fully populated by recoverExistingSessions().
+  if (state.recoveryCompletedAt == null) {
+    logger.debug('[HELP AUTO SPAWN] Recovery not yet complete — skipping all teams');
+    return;
+  }
+  if (now - state.recoveryCompletedAt < HELP_RECOVERY_WARMUP_MS) {
+    const remaining = Math.ceil((HELP_RECOVERY_WARMUP_MS - (now - state.recoveryCompletedAt)) / 1000);
+    logger.debug(`[HELP AUTO SPAWN] Recovery warm-up active (${remaining}s remaining) — skipping all teams`);
+    return;
+  }
 
   for (const teamId of activeTeamIds) {
     const lastChecked = state.lastCheckedTsByTeam.get(teamId) ?? state.initialNow;

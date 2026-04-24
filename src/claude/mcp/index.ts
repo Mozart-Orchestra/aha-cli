@@ -302,6 +302,7 @@ export async function startAhaServer(
             'tsc_check',
             'git_diff_summary',
             'get_resource_status',
+            'get_pool_status',
             'acquire_heavy_op_slot',
             'release_heavy_op_slot',
             'read_unified_log',

@@ -911,6 +911,62 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
         }
     });
 
+    // ─── get_pool_status ─────────────────────────────────────────────────────
+    // Returns a snapshot of all daemon-tracked sessions with role, teamId, PID liveness,
+    // and aggregate pool counts per role. Useful for QA/reviewers to verify pool state
+    // without relying on chat broadcast messages.
+    mcp.registerTool('get_pool_status', {
+        description: [
+            'Get current daemon session pool status: all tracked sessions with PID liveness, role, teamId,',
+            'and aggregate pool counts per role (alive/dead/total).',
+            'Use this instead of counting chat "Initializing" messages to verify pool state.',
+            'Available to ALL team members.',
+        ].join(' '),
+        title: 'Get Pool Status',
+        inputSchema: {
+            format: z.enum(['text', 'json']).optional().describe('Response format. Defaults to text.'),
+        },
+    }, async (args) => {
+        try {
+            const { sessions, poolCounts } = await ctx.listDaemonPoolStatus();
+
+            if (args.format === 'json') {
+                return {
+                    content: [{ type: 'text', text: JSON.stringify({ sessions, poolCounts }, null, 2) }],
+                    isError: false,
+                };
+            }
+
+            const lines: string[] = ['═══ Pool Status ═══', ''];
+            lines.push(`Total sessions: ${sessions.length}`);
+            lines.push('');
+
+            if (Object.keys(poolCounts).length > 0) {
+                lines.push('Pool counts by role:');
+                for (const [role, counts] of Object.entries(poolCounts)) {
+                    const status = counts.dead > 0 ? ' ⚠️' : '';
+                    lines.push(`  ${role}: ${counts.alive} alive / ${counts.dead} dead / ${counts.total} total${status}`);
+                }
+                lines.push('');
+            }
+
+            lines.push('Sessions:');
+            for (const s of sessions) {
+                const alive = s.pidAlive ? 'alive' : 'DEAD';
+                const role = s.role ?? 'unknown';
+                const team = s.teamId ?? 'no-team';
+                lines.push(`  ${s.ahaSessionId} | PID ${s.pid} (${alive}) | ${role} | ${team}`);
+            }
+
+            return {
+                content: [{ type: 'text', text: lines.join('\n') }],
+                isError: false,
+            };
+        } catch (error) {
+            return { content: [{ type: 'text', text: `Error getting pool status: ${String(error)}` }], isError: true };
+        }
+    });
+
     // ─── Resource Governor tools ──────────────────────────────────────────────
     registerResourceGovernorTools(mcp, {
         ahaHomeDir: configuration.ahaHomeDir,
@@ -2695,6 +2751,17 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
         const legionWarning = isLegionSpec
             ? `\n⚠️  LegionImage detected: this genome has a members[] spec, not an AgentImage. Diffs apply to the serialized spec — use changes[] targeting LegionImage fields (members, bootContext.taskPolicy, etc.) rather than AgentImage paths (protocol, systemPrompt, responsibilities).`
             : '';
+
+        // ── systemPrompt length cap (P1 security: prevent unbounded prompt growth) ──
+        const MAX_SYSTEM_PROMPT_LENGTH = 32_000;
+        const previewForCapCheck = applyPreviewDiffChanges(currentSpec, diffChanges);
+        const promptAfterChanges = String(previewForCapCheck.systemPrompt ?? '') + String(previewForCapCheck.systemPromptSuffix ?? '');
+        if (promptAfterChanges.length > MAX_SYSTEM_PROMPT_LENGTH) {
+            return {
+                content: [{ type: 'text', text: `Cannot evolve: resulting systemPrompt + systemPromptSuffix would be ${promptAfterChanges.length} chars, exceeding the ${MAX_SYSTEM_PROMPT_LENGTH} char safety cap. Remove or shorten existing prompt content before appending.` }],
+                isError: true,
+            };
+        }
 
         if (args.dryRun) {
             const previewSpec = applyPreviewDiffChanges(currentSpec, diffChanges);
