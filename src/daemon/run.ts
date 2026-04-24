@@ -740,7 +740,7 @@ export async function startDaemon(): Promise<void> {
     // Start at supervisorInterval - 1 so the first heartbeat tick triggers
     // supervisor spawn immediately instead of waiting N * heartbeatIntervalMs.
     let heartbeatCount = supervisorInterval - 1;
-    const helpAutoSpawnState = createHelpAutoSpawnState();
+    const helpAutoSpawnState = createHelpAutoSpawnState(Date.now());
 
     // ── Heartbeat interval ─────────────────────────────────────────────────────
     // Every heartbeatIntervalMs (default 60s):

@@ -44,6 +44,12 @@ export interface HelpAutoSpawnState {
   lastCheckedTsByTeam: Map<string, number>;
   /** Last timestamp (ms) we triggered a help-agent spawn for each team. */
   lastSpawnTsByTeam: Map<string, number>;
+  /**
+   * Timestamp to use when a team is encountered for the first time.
+   * Prevents replaying all historical @help messages after daemon restart.
+   * Defaults to 0 (read all history) when not provided.
+   */
+  initialNow: number;
 }
 
 export type RequestHelpFn = (params: {
@@ -67,10 +73,11 @@ interface SessionWithMeta {
 
 // ── Factory ───────────────────────────────────────────────────────────────────
 
-export function createHelpAutoSpawnState(): HelpAutoSpawnState {
+export function createHelpAutoSpawnState(initialNow?: number): HelpAutoSpawnState {
   return {
     lastCheckedTsByTeam: new Map(),
     lastSpawnTsByTeam: new Map(),
+    initialNow: initialNow ?? 0,
   };
 }
 
@@ -181,7 +188,7 @@ export async function checkHelpAutoSpawn(params: {
   const now = params.now ?? Date.now();
 
   for (const teamId of activeTeamIds) {
-    const lastChecked = state.lastCheckedTsByTeam.get(teamId) ?? 0;
+    const lastChecked = state.lastCheckedTsByTeam.get(teamId) ?? state.initialNow;
     const lastSpawn = state.lastSpawnTsByTeam.get(teamId) ?? 0;
 
     // Advance the check cursor regardless of spawn outcome
@@ -198,25 +205,24 @@ export async function checkHelpAutoSpawn(params: {
 
     if (!hasHelpRequest) continue;
 
-    // Pool cap check — dual-source: take max of local session tracking and server roster
+    // Pool cap check — local PID-based count is the authoritative source.
+    // Server roster is logged for diagnostics but NOT used for blocking because
+    // server-side member records are never cleaned up when sessions die
+    // (lifecycle.runStatus stays 'active' indefinitely).
     const localHelpCount = countActiveHelpAgents(sessions, teamId);
-    let activeHelpCount = localHelpCount;
+    const activeHelpCount = localHelpCount;
 
     if (serverHelpCountFn) {
       try {
         const serverHelpCount = await serverHelpCountFn(teamId);
-        if (serverHelpCount > localHelpCount) {
-          activeHelpCount = serverHelpCount;
+        if (serverHelpCount !== localHelpCount) {
           logger.debug(
-            `[HELP AUTO SPAWN] Server reports more help-agents (${serverHelpCount}) ` +
-            `than local tracking (${localHelpCount}) for team ${teamId} — using server count`
+            `[HELP AUTO SPAWN] Server/Local count mismatch for team ${teamId}: ` +
+            `server=${serverHelpCount}, local=${localHelpCount} (using local)`
           );
         }
-      } catch (err) {
-        logger.debug(
-          `[HELP AUTO SPAWN] Server roster check failed for team ${teamId}, ` +
-          `falling back to local count: ${err}`
-        );
+      } catch {
+        // Diagnostic only — ignore failure
       }
     }
 
