@@ -24,7 +24,7 @@ function isContextOverflowError(text: string): boolean {
         (lower.includes('invalid_request_error') && lower.includes('input length')) ||
         // "The model has reached its context window limit"
         lower.includes('context window limit') ||
-        // Standard API error type
+        // Standard API error type (OpenAI-compatible and Anthropic)
         lower.includes('context_length_exceeded') ||
         // "prompt is too long: X tokens > Y tokens"
         lower.includes('prompt is too long') ||
@@ -32,7 +32,14 @@ function isContextOverflowError(text: string): boolean {
         lower.includes('token limit') ||
         lower.includes('too many tokens') ||
         // "max_tokens exceeded" from some relay providers
-        (lower.includes('max_tokens') && lower.includes('exceed'))
+        (lower.includes('max_tokens') && lower.includes('exceed')) ||
+        // OpenAI-compatible relay: "maximum context length" or "max_context_length"
+        lower.includes('max_context_length') ||
+        lower.includes('maximum context length') ||
+        // Anthropic relay/gateway: "request too large" combined with token keywords
+        (lower.includes('request too large') && lower.includes('token')) ||
+        // Generic relay: 400 error combined with context/token overflow indicators
+        (lower.includes('400') && lower.includes('context') && (lower.includes('exceed') || lower.includes('limit') || lower.includes('long')))
     );
 }
 

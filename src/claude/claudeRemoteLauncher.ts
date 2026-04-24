@@ -708,9 +708,17 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
                     : JSON.stringify(e);
                 logger.debug('[remote]: launch error', errorDetail);
 
+                // Two detection paths: (1) our explicit CLAUDE_CONTEXT_LENGTH_EXCEEDED sentinel,
+                // (2) raw API error that bypassed claudeRemote's detection (e.g. SDK-level throw).
+                const errMsg = e instanceof Error ? e.message.toLowerCase() : '';
                 const isContextLengthError = e instanceof Error && e.message.startsWith('CLAUDE_CONTEXT_LENGTH_EXCEEDED');
+                const isRawContextOverflow = errMsg.includes('context_length_exceeded')
+                    || errMsg.includes('context window limit')
+                    || (errMsg.includes('invalid_request_error') && errMsg.includes('input length'))
+                    || (errMsg.includes('max_context_length'))
+                    || (errMsg.includes('prompt is too long'));
 
-                if (isContextLengthError) {
+                if (isContextLengthError || isRawContextOverflow) {
                     logger.debug('[remote]: Context length exceeded — resetting session and retrying immediately');
                     session.client.sendSessionEvent({ type: 'message', message: 'Context limit reached, starting fresh session...' });
                     session.clearSessionId();
