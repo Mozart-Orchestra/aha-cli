@@ -19,7 +19,7 @@ import type {
   TraceLinkRel,
   TraceQueryOpts,
 } from './traceTypes';
-import { TRACE_LINK_RELS } from './traceTypes';
+import { TRACE_LINK_RELS, TraceEventKind } from './traceTypes';
 
 // ── Schema DDL ──────────────────────────────────────────────────────────────
 
@@ -240,6 +240,11 @@ function queryEvents(
   const sql = `SELECT * FROM trace_events WHERE ${where} ORDER BY ts ASC LIMIT @_limit OFFSET @_offset;`;
   const stmt = db.prepare(sql);
   return stmt.all({ ...allParams, _limit: limit, _offset: offset }) as TraceEvent[];
+}
+
+/** Query events by kind, ordered by timestamp. */
+export function queryByKind(kind: TraceEventKind, opts?: TraceQueryOpts): TraceEvent[] {
+  return queryEvents('1=1', {}, { ...opts, kind });
 }
 
 /** Query events by team_id, ordered by timestamp. */

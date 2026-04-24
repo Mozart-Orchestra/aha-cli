@@ -75,6 +75,7 @@ import { runHeartbeatCycle } from './heartbeat';
 import { runSupervisorCycle, collectLiveMainlineSessionIdsByTeam } from './supervisorScheduler';
 import { shouldUsePidHeartbeat } from './heartbeatPolicy';
 import { checkHelpAutoSpawn, createHelpAutoSpawnState } from './helpAutoSpawn';
+import { runAnomalyDetection } from './anomalyDetector';
 
 // Prepare initial metadata — use configuration.currentCliVersion (reads from disk)
 // instead of compiled packageJson.version to avoid stale version after bump-without-rebuild.
@@ -846,6 +847,21 @@ export async function startDaemon(): Promise<void> {
               }
             },
           });
+        }
+
+        // Step 4: anomaly detection (spawn frequency + pool overflow)
+        try {
+          const anomalies = runAnomalyDetection({
+            pidToTrackedSession,
+            activeTeamIds: allActiveTeamIds,
+          });
+          if (anomalies.length > 0) {
+            for (const alert of anomalies) {
+              logger.debug(`[ANOMALY DETECTOR] ${alert.severity.toUpperCase()}: ${alert.message}`);
+            }
+          }
+        } catch (anomalyErr) {
+          logger.debug('[DAEMON RUN] Anomaly detection failed (non-fatal):', anomalyErr);
         }
       } catch (error) {
         logger.debug('[DAEMON RUN] Error in heartbeat cycle (non-fatal, will retry next tick)', error);

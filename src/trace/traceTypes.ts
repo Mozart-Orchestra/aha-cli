@@ -62,6 +62,9 @@ export enum TraceEventKind {
   // evolution_chain (2)
   agent_scored = 'agent_scored',
   genome_evolved = 'genome_evolved',
+
+  // anomaly_chain (1)
+  anomaly_detected = 'anomaly_detected',
 }
 
 /** All valid event kind string values */
