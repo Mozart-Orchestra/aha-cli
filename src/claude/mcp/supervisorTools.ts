@@ -77,6 +77,7 @@ import { McpToolContext } from './mcpContext';
 import { buildMountedAgentPrompt } from '@/utils/buildMountedAgentPrompt';
 import type { Metadata } from '@/api/types';
 import { buildGenomeRefPath, parseGenomeRef } from '@/utils/genomeRefs';
+import { classifyRootCause, formatRootCauseSummary, determineTriggerLevel, type ScoreDimensions, type SystemStateForClassification } from './rootCauseClassification';
 
 /**
  * Resolve entity namespace + name from explicit params or a specRef string.
@@ -838,12 +839,12 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
                                     ? (match.claudeLocalSessionId || match.ahaSessionId)
                                     : match.ahaSessionId;
                                 targetMetadata = {
-                                    ...(targetMetadata || {}),
+                                    ...targetMetadata,
                                     ...(match.runtimeType ? { flavor: match.runtimeType as any } : {}),
                                     ...(match.role ? { role: match.role } : {}),
                                     ...(match.claudeLocalSessionId ? { claudeSessionId: match.claudeLocalSessionId } : {}),
                                     ...(match.codexTranscriptPath ? { codexTranscriptPath: match.codexTranscriptPath } : {}),
-                                };
+                                } as Metadata;
                             }
                         }
                     }
@@ -2173,6 +2174,45 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
             }
         }
 
+        // ── Root Cause Classification (evolution-loop Phase 1) ──
+        // Classify low scores to distinguish system vs genome problems.
+        // Only genome-rooted problems should trigger evolve_genome.
+        let rootCauseSummary = '';
+        const triggerLevel = determineTriggerLevel(overall, dimensions);
+        if (triggerLevel === 'L2_alert') {
+            try {
+                const systemState: SystemStateForClassification = {
+                    deployCommit: process.env.AHA_DEPLOY_COMMIT ?? undefined,
+                    agentBuildCommit: process.env.AHA_BUILD_COMMIT ?? undefined,
+                    prismaProviderCorrect: undefined, // filled by deploy-manifest in future
+                    visibleToolCount: undefined, // filled by self-view in future
+                    expectedToolCount: undefined,
+                    teamAvgScore: undefined, // filled by team pulse in future
+                };
+                const rootCause = classifyRootCause(overall, dimensions, systemState);
+                rootCauseSummary = '\n\n' + formatRootCauseSummary(rootCause);
+                logger.debug(
+                    `[score_agent] Root cause: ${rootCause.category.type}/${rootCause.category.subType} → ${rootCause.recommendedAction}`,
+                );
+            } catch (error) {
+                logger.debug(`[score_agent] Root cause classification error: ${String(error)}`);
+            }
+        }
+
+        // ── Trace: agent_scored ──
+        try {
+            emitTraceEvent(
+                TraceEventKind.agent_scored,
+                'mcp',
+                {
+                    team_id: args.teamId,
+                    session_id: args.sessionId,
+                },
+                `Agent scored: ${args.role} overall=${overall} level=${triggerLevel}`,
+                { attrs: { role: args.role, overall: String(overall), triggerLevel, action: args.action } },
+            );
+        } catch { /* trace must never break main flow */ }
+
         // ── Write Verdict to canonical hub evidence chain ──
         let verdictId: string | null = null;
         let trialId: string | null = null;
@@ -2295,7 +2335,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
         return {
             content: [{
                 type: 'text',
-                text: `Scored ${args.role}${resolvedSpecId ? ` (specId=${resolvedSpecId}${autoResolvedNote})` : ''} session=${args.sessionId}: overall=${overall},${hardInfo}${sessionInfo} action=${args.action}, mode=${scoringMode}${verdictInfo}${autoFeedbackNote}\n${dimSummary}${evolutionSuggestion}`,
+                text: `Scored ${args.role}${resolvedSpecId ? ` (specId=${resolvedSpecId}${autoResolvedNote})` : ''} session=${args.sessionId}: overall=${overall},${hardInfo}${sessionInfo} action=${args.action}, mode=${scoringMode}${verdictInfo}${autoFeedbackNote}\n${dimSummary}${evolutionSuggestion}${rootCauseSummary}`,
             }],
             isError: false,
         };
@@ -2709,6 +2749,20 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
             const newVersion = result.genome?.version ?? '?';
             const diffId = result.diff?.id ?? '?';
             const via = diffResult.transport === 'server-proxy' ? ' (via server proxy)' : '';
+
+            // ── Trace: genome_evolved ──
+            try {
+                emitTraceEvent(
+                    TraceEventKind.genome_evolved,
+                    'mcp',
+                    {
+                        team_id: client.getMetadata()?.teamId ?? null,
+                        session_id: client.sessionId,
+                    },
+                    `Genome evolved: ${args.genomeNamespace}/${args.genomeName} → v${newVersion} (diffId=${diffId})`,
+                    { attrs: { namespace: args.genomeNamespace, name: args.genomeName, version: String(newVersion), diffId } },
+                );
+            } catch { /* trace must never break main flow */ }
 
             return {
                 content: [{

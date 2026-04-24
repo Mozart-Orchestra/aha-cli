@@ -139,6 +139,18 @@ export function hasLiveSupervisorForTeam(
     if (executionPlane && executionPlane !== 'bypass') continue;
     if (session.intentionallyStopped) continue;
 
+    // If the session's lifecycle has reached a terminal state (retired, auto-retired,
+    // archived), treat as not live. The OS process may still be running (or PID
+    // recycled) but the supervisor has logically exited — it should not block a new spawn.
+    const lifecycleState = meta?.lifecycleState;
+    if (lifecycleState && lifecycleState !== 'running') {
+      logger.debug(
+        `[SUPERVISOR SCHEDULER] Supervisor session ${session.ahaSessionId} (PID ${session.pid}) ` +
+        `has lifecycleState="${lifecycleState}" — treating as not live`
+      );
+      continue;
+    }
+
     // If MCP-layer heartbeat considers this supervisor dead, treat as not live
     // even if the PID is still alive (zombie supervisor split-brain).
     if (mcpDeadSessionIds && session.ahaSessionId && mcpDeadSessionIds.has(session.ahaSessionId)) {
@@ -151,6 +163,11 @@ export function hasLiveSupervisorForTeam(
 
     try {
       process.kill(session.pid, 0);
+      // PID is alive — but also verify the child process hasn't exited
+      // (edge case: exit handler hasn't fired yet, entry still in tracking map)
+      if (session.childProcess?.exitCode != null) {
+        continue;
+      }
       return true;
     } catch {
       // Stale tracked entry; the persisted PID guard below will clean it up.
@@ -727,33 +744,73 @@ export async function runSupervisorCycle(ctx: SupervisorContext): Promise<void> 
       try {
         process.kill(supervisorState.lastSupervisorPid, 0); // liveness check
 
-        // PID is alive, but check if MCP heartbeat considers the supervisor session dead (zombie).
-        // Prefer the tracked PID→session identity because persisted supervisor state can lag
-        // daemon runtime state. In the split-brain failure mode, lastSupervisorPid is set but
-        // lastSessionId may be null/stale, while pidToTrackedSession still knows the actual
-        // AHA session that MCP heartbeat has declared dead.
+        // PID is alive — verify the supervisor session is still tracked and active.
+        // Without positive evidence of a live tracked session, assume offline/archived/PID-recycled.
         const trackedSupervisor = findTrackedSupervisorSessionForPid(
           teamId,
           supervisorState.lastSupervisorPid,
           pidToTrackedSession
         );
-        const lastSessionId = trackedSupervisor?.ahaSessionId || supervisorState.lastSessionId;
-        const isZombie = lastSessionId && mcpDeadSessionIds.has(lastSessionId);
-        if (isZombie) {
+        if (!trackedSupervisor) {
+          // PID alive but not tracked as a supervisor — offline/archived or PID recycled.
           logger.debug(
-            `[SUPERVISOR SCHEDULER] Supervisor PID ${supervisorState.lastSupervisorPid} (session ${lastSessionId}) ` +
-            `is alive in OS but marked dead by MCP heartbeat — killing zombie and respawning for team ${teamId}`
+            `[SUPERVISOR SCHEDULER] PID ${supervisorState.lastSupervisorPid} alive but not tracked ` +
+            `as supervisor for team ${teamId} — clearing stale PID, allowing respawn`
           );
-          try {
-            process.kill(supervisorState.lastSupervisorPid, 'SIGTERM');
-          } catch { /* already dead */ }
           await updateSupervisorRun(teamId, { lastSupervisorPid: 0 });
           // Fall through to spawn a new supervisor
         } else {
-          logger.debug(
-            `[SUPERVISOR SCHEDULER] Supervisor already running (PID ${supervisorState.lastSupervisorPid}) for team ${teamId}, skipping`
-          );
-          continue;
+          const lastSessionId = trackedSupervisor.ahaSessionId || supervisorState.lastSessionId;
+          const isZombie = lastSessionId && mcpDeadSessionIds.has(lastSessionId);
+          if (isZombie) {
+            logger.debug(
+              `[SUPERVISOR SCHEDULER] Supervisor PID ${supervisorState.lastSupervisorPid} (session ${lastSessionId}) ` +
+              `is alive in OS but marked dead by MCP heartbeat — killing zombie and respawning for team ${teamId}`
+            );
+            try {
+              process.kill(supervisorState.lastSupervisorPid, 'SIGTERM');
+            } catch { /* already dead */ }
+            await updateSupervisorRun(teamId, { lastSupervisorPid: 0 });
+            // Fall through to spawn a new supervisor
+          } else {
+            // PID alive and not zombie by MCP — but check lifecycleState.
+            // A retired/auto-retired supervisor should not block spawning a replacement.
+            const trackedLifecycle = trackedSupervisor?.ahaSessionMetadataFromLocalWebhook?.lifecycleState;
+            if (trackedLifecycle && trackedLifecycle !== 'running') {
+              logger.debug(
+                `[SUPERVISOR SCHEDULER] Supervisor PID ${supervisorState.lastSupervisorPid} (session ${lastSessionId}) ` +
+                `has lifecycleState="${trackedLifecycle}" — killing retired supervisor and respawning for team ${teamId}`
+              );
+              try {
+                process.kill(supervisorState.lastSupervisorPid, 'SIGTERM');
+              } catch { /* already dead */ }
+              await updateSupervisorRun(teamId, { lastSupervisorPid: 0 });
+              // Fall through to spawn a new supervisor
+            } else {
+              // PID alive and not zombie by MCP — but check for stale activity.
+              const staleThresholdMs = parseInt(process.env.AHA_SUPERVISOR_STALE_MS || '600000', 10);
+              if (
+                supervisorState.lastRunAt > 0 &&
+                (now - supervisorState.lastRunAt) > staleThresholdMs
+              ) {
+                logger.debug(
+                  `[SUPERVISOR SCHEDULER] Supervisor PID ${supervisorState.lastSupervisorPid} alive but stale ` +
+                  `(${Math.round((now - supervisorState.lastRunAt) / 60000)}min since last activity) ` +
+                  `for team ${teamId} — killing and respawning`
+                );
+                try {
+                  process.kill(supervisorState.lastSupervisorPid, 'SIGTERM');
+                } catch { /* already dead */ }
+                await updateSupervisorRun(teamId, { lastSupervisorPid: 0 });
+                // Fall through to spawn a new supervisor
+              } else {
+                logger.debug(
+                  `[SUPERVISOR SCHEDULER] Supervisor already running (PID ${supervisorState.lastSupervisorPid}) for team ${teamId}, skipping`
+                );
+                continue;
+              }
+            }
+          }
         }
       } catch {
         logger.debug(

@@ -58,6 +58,10 @@ export enum TraceEventKind {
   // http_chain (2)
   http_request_completed = 'http_request_completed',
   http_request_failed = 'http_request_failed',
+
+  // evolution_chain (2)
+  agent_scored = 'agent_scored',
+  genome_evolved = 'genome_evolved',
 }
 
 /** All valid event kind string values */

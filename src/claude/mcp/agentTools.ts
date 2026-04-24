@@ -57,6 +57,25 @@ import {
 import { emitTraceEvent } from '@/trace/traceEmitter';
 import { TraceEventKind } from '@/trace/traceTypes';
 import { McpToolContext, ReplaceAgentStageError } from './mcpContext';
+import { HELP_POOL_MAX } from '@/daemon/helpAutoSpawn';
+
+/**
+ * Count active help-agent members in a team roster (best-effort, returns 0 on failure).
+ */
+async function countHelpAgentsInTeam(
+    api: McpToolContext['api'],
+    parseBoardFromArtifact: McpToolContext['parseBoardFromArtifact'],
+    teamId: string,
+): Promise<number> {
+    try {
+        const artifact = await api.getArtifact(teamId);
+        const board = parseBoardFromArtifact(artifact);
+        const members: any[] = board?.team?.members ?? [];
+        return members.filter((m: any) => m.role === 'help-agent' || m.roleId === 'help-agent').length;
+    } catch {
+        return 0;
+    }
+}
 
 /**
  * Collect handoff comments from a predecessor's tasks to inject into the new agent's context.
@@ -377,13 +396,62 @@ The \`prompt\` field is injected as the agent's initial task context. Write it a
             // compatibility shims and explicit authorities stay consistent.
             const allowed = canSpawnAgents(role, effectiveGenome);
             if (!allowed) {
+                // Master delegation model: instead of hard-blocking, create a
+                // delegation task so Master can execute the spawn with proper
+                // permissions. This avoids Builder-type roles being stuck.
+                try {
+                    const delegationTitle = `[Spawn Request] ${args.role}${args.sessionName ? ` "${args.sessionName}"` : ''}`;
+                    const delegationDesc = [
+                        `**Spawn delegation request from ${role || 'unknown'}**`,
+                        ``,
+                        `Requested agent:`,
+                        `- role: ${args.role}`,
+                        `- sessionName: ${args.sessionName ?? '(auto)'}`,
+                        `- specId: ${args.specId ?? '(default)'}`,
+                        `- model: ${args.model ?? '(default)'}`,
+                        `- teamId: ${args.teamId ?? '(current)'}`,
+                        `- executionPlane: ${args.executionPlane ?? '(default)'}`,
+                        ``,
+                        `Caller (${role}) lacks spawn permission. Master should execute:`,
+                        `\`create_agent(role="${args.role}", ${args.specId ? `specId="${args.specId}", ` : ''}${args.sessionName ? `sessionName="${args.sessionName}", ` : ''}teamId="${args.teamId}")\``,
+                    ].filter(Boolean).join('\n');
+
+                    await api.createTask(teamId, {
+                        title: delegationTitle,
+                        description: delegationDesc,
+                        status: 'todo',
+                        priority: 'high',
+                        reporterId: client.sessionId,
+                    });
+                } catch {
+                    // Task creation is best-effort; fall through to hard error
+                }
+
                 return {
                     content: [{
                         type: 'text',
-                        text: `Error: Role "${role || 'unknown'}" cannot create agents. Only bootstrap/coordinator roles may spawn team members.`
+                        text: [
+                            `Spawn delegation: Role "${role || 'unknown'}" cannot create agents directly.`,
+                            `A delegation task has been created for Master to execute this spawn.`,
+                            `Master will see the request on the board and can approve + execute.`,
+                            ``,
+                            `Alternatively, send a team message with @master requesting the spawn.`,
+                        ].join('\n'),
                     }],
-                    isError: true,
+                    isError: false,
                 };
+            }
+
+            // Help-agent pool cap: enforce HELP_POOL_MAX across all spawn paths,
+            // not just the auto-spawn (@help mention) path.
+            if (args.role === 'help-agent') {
+                const activeHelpCount = await countHelpAgentsInTeam(api, parseBoardFromArtifact, args.teamId);
+                if (activeHelpCount >= HELP_POOL_MAX) {
+                    return {
+                        content: [{ type: 'text', text: `Error: Help-agent pool is full (${activeHelpCount}/${HELP_POOL_MAX}). Use replace_agent to swap an existing help-agent, or remove an inactive one first.` }],
+                        isError: true,
+                    };
+                }
             }
 
             // Generate and carry member identity as a pair so create_agent
@@ -471,11 +539,16 @@ The \`prompt\` field is injected as the agent's initial task context. Write it a
                 );
             } catch { /* trace must never break main flow */ }
 
+            // Codex spawns involve Docker container setup and may take >15s.
+            // Use a longer timeout to avoid the caller seeing a timeout error
+            // while the daemon successfully completes the spawn in the background,
+            // which causes duplicate agent creation on retry.
+            const spawnTimeoutMs = runtime === 'codex' ? 60_000 : 15_000;
             const response = await fetch(`http://127.0.0.1:${daemonState.httpPort}/spawn-session`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(spawnBody),
-                signal: AbortSignal.timeout(15_000),
+                signal: AbortSignal.timeout(spawnTimeoutMs),
             });
 
             const result = await response.json() as { success?: boolean; sessionId?: string; queued?: boolean; error?: string };
@@ -1327,13 +1400,37 @@ The \`prompt\` field is injected as the agent's initial task context. Write it a
 
             const allowed = canSpawnAgents(role, effectiveGenome);
             if (!allowed) {
+                try {
+                    const delegationTitle = `[Batch Spawn Request] ${args.agents.length} agent(s)`;
+                    const agentList = args.agents.map((a, i) => `${i + 1}. role=${a.role}${a.specId ? ` specId=${a.specId}` : ''}${a.sessionName ? ` name="${a.sessionName}"` : ''}`).join('\n');
+                    await api.createTask(currentTeamId, {
+                        title: delegationTitle,
+                        description: `**Batch spawn delegation from ${role || 'unknown'}**\n\n${agentList}\n\nCaller lacks spawn permission. Master should execute batch spawn.`,
+                        status: 'todo',
+                        priority: 'high',
+                        reporterId: client.sessionId,
+                    });
+                } catch { /* best effort */ }
+
                 return {
                     content: [{
                         type: 'text',
-                        text: `Error: Role "${role || 'unknown'}" cannot create agents. Only bootstrap/coordinator roles may spawn team members.`
+                        text: `Spawn delegation: Role "${role || 'unknown'}" cannot batch-spawn agents. A delegation task has been created for Master.`,
                     }],
-                    isError: true,
+                    isError: false,
                 };
+            }
+
+            // Help-agent pool cap for batch: count existing + pending help-agent specs
+            const helpAgentSpecs = args.agents.filter(a => a.role === 'help-agent');
+            if (helpAgentSpecs.length > 0) {
+                const existingHelpCount = await countHelpAgentsInTeam(api, parseBoardFromArtifact, args.teamId);
+                if (existingHelpCount + helpAgentSpecs.length > HELP_POOL_MAX) {
+                    return {
+                        content: [{ type: 'text', text: `Error: Batch would exceed help-agent pool limit. Existing: ${existingHelpCount}, requested: ${helpAgentSpecs.length}, max: ${HELP_POOL_MAX}.` }],
+                        isError: true,
+                    };
+                }
             }
 
             const [daemonState, batchSettings] = await Promise.all([readDaemonState(), readSettings()]);
@@ -1384,11 +1481,14 @@ The \`prompt\` field is injected as the agent's initial task context. Write it a
                     }
 
                     try {
+                        // Codex spawns may take >15s (Docker container setup).
+                        // Use a longer timeout to avoid false failures that cause duplicate agents on retry.
+                        const batchSpawnTimeoutMs = runtime === 'codex' ? 60_000 : 15_000;
                         const response = await fetch(`http://127.0.0.1:${daemonState.httpPort}/spawn-session`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(spawnBody),
-                            signal: AbortSignal.timeout(15_000),
+                            signal: AbortSignal.timeout(batchSpawnTimeoutMs),
                         });
 
                         const result = await response.json() as { success?: boolean; sessionId?: string; queued?: boolean; queuePosition?: number; error?: string };
