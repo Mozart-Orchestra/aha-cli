@@ -3497,7 +3497,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
         description: 'Terminate a running agent. Use as last resort when an agent is unresponsive or causing problems. Supervisor/help-agent only.',
         title: 'Kill Agent',
         inputSchema: {
-            sessionId: z.string().describe('Session ID of agent to kill'),
+            sessionId: z.string().regex(/^[a-zA-Z0-9_-]+$/).describe('Session ID of agent to kill'),
             reason: z.string().describe('Why this agent needs to be killed'),
         },
     }, async (args) => {
@@ -3528,13 +3528,17 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
             if (!result.success) {
                 logger.debug(`[kill_agent] Daemon stop-session returned false for ${args.sessionId}, attempting OS-level fallback`);
                 try {
-                    const { execSync } = await import('node:child_process');
-                    // Find PIDs whose command line contains the session ID (aha-agi session tag)
-                    const psOutput = execSync(
-                        `ps aux | grep -E 'dist/index.mjs|aha.mjs' | grep '${args.sessionId}' | grep -v grep || true`,
-                        { timeout: 5_000, encoding: 'utf-8' },
+                    const { execFileSync } = await import('node:child_process');
+                    // Defense-in-depth: runtime guard + execFileSync prevents shell injection.
+                    if (!/^[a-zA-Z0-9_-]+$/.test(args.sessionId)) {
+                        return { content: [{ type: 'text', text: `Invalid sessionId format` }], isError: true };
+                    }
+                    const rawPs = execFileSync('ps', ['aux'], { timeout: 5_000, encoding: 'utf-8', shell: false });
+                    const lines = rawPs.split('\n').filter(line =>
+                        (line.includes('dist/index.mjs') || line.includes('aha.mjs'))
+                        && line.includes(args.sessionId)
+                        && !line.includes('grep'),
                     );
-                    const lines = psOutput.trim().split('\n').filter(Boolean);
                     if (lines.length === 0) {
                         return { content: [{ type: 'text', text: `Session ${args.sessionId} not found in daemon tracking or OS process list. May have already exited.` }], isError: true };
                     }
