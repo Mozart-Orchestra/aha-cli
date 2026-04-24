@@ -75,8 +75,10 @@ export const INSPECT_PRIVILEGED_ROLES = ['supervisor', 'org-manager', 'master', 
 /** Roles that can score agents (score_agent, score_supervisor_self, etc.). */
 export const SCORING_ROLES = ['supervisor', 'help-agent', 'master', 'orchestrator', 'org-manager'] as const;
 
-/** Roles that can edit / evolve / mutate genome specs. */
-export const GENOME_EDIT_ROLES = ['supervisor', 'org-manager', 'agent-builder', 'master', 'help-agent'] as const;
+/** Roles that can edit / evolve / mutate genome specs.
+ *  help-agent removed (Sprint 0427): pool overflow agents had GENOME_EDIT_ROLES,
+ *  creating a self-evolution injection attack surface (T2 in STRIDE threat model). */
+export const GENOME_EDIT_ROLES = ['supervisor', 'org-manager', 'agent-builder', 'master'] as const;
 
 /** Roles that can create team tasks on behalf of the team. */
 export const TASK_CREATE_ROLES = ['master', 'orchestrator'] as const;

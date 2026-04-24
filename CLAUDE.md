@@ -410,7 +410,7 @@ User interface components.
 | TOOL_GRANT_ROLES | supervisor, master | roleConstants.ts:85 |
 | AGENT_REPLACE_ROLES | supervisor, master, help-agent, org-manager | roleConstants.ts:88 |
 | SCORING_ROLES | supervisor, help-agent, master, orchestrator, org-manager | roleConstants.ts:77 |
-| GENOME_EDIT_ROLES | supervisor, org-manager, agent-builder, master, help-agent | roleConstants.ts:79 |
+| GENOME_EDIT_ROLES | supervisor, org-manager, agent-builder, master | roleConstants.ts:78 |
 | SUPERVISOR_OBSERVATION_ROLES | supervisor, help-agent, org-manager, master, engineering-reviewer, security-reviewer, qa-commander, builder, security-officer | roleConstants.ts:91 |
 
 ### Node 环境注意事项
