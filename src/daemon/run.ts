@@ -820,9 +820,14 @@ export async function startDaemon(): Promise<void> {
                 if (!result) return 0;
                 const members = result.team.members ?? [];
                 return members.filter(
-                  (m: Record<string, unknown>) =>
-                    (typeof m.role === 'string' && m.role === 'help-agent') ||
-                    (typeof m.roleId === 'string' && m.roleId === 'help-agent')
+                  (m: Record<string, unknown>) => {
+                    const isHelpAgent =
+                      (typeof m.role === 'string' && m.role === 'help-agent') ||
+                      (typeof m.roleId === 'string' && m.roleId === 'help-agent');
+                    if (!isHelpAgent) return false;
+                    if ('runStatus' in m && typeof m.runStatus === 'string' && m.runStatus !== 'active') return false;
+                    return true;
+                  }
                 ).length;
               } catch {
                 return 0;
