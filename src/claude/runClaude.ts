@@ -59,6 +59,7 @@ import { buildModelSelfAwarenessPrompt, resolveContextWindowTokens, DEFAULT_CLAU
 import { resolveInitialModelOverrides } from './utils/modelOverrides';
 import { buildMountedAgentPrompt } from '@/utils/buildMountedAgentPrompt';
 import { sanitizeFallbackModel } from './utils/sanitizeFallbackModel';
+import { isAllowedModelId } from './utils/validateModelId';
 import { computeEffectiveAllowedToolsFromMetadata, hasDynamicGrantOptIn } from './utils/temporaryToolGrants';
 import { buildSessionScopeFilters } from './team/sessionScope';
 import { serializeErrorForLog } from '@/utils/serializeErrorForLog';
@@ -305,10 +306,18 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
         metadata.roomName = process.env.AHA_ROOM_NAME;
     }
     if (process.env.AHA_AGENT_MODEL) {
-        metadata.modelOverride = process.env.AHA_AGENT_MODEL;
+        if (!isAllowedModelId(process.env.AHA_AGENT_MODEL)) {
+            logger.error(`[runClaude] REJECTED model override from env: '${process.env.AHA_AGENT_MODEL}'. Only 'claude-' prefix allowed. Clearing.`);
+        } else {
+            metadata.modelOverride = process.env.AHA_AGENT_MODEL;
+        }
     }
     if (process.env.AHA_FALLBACK_AGENT_MODEL) {
-        metadata.fallbackModelOverride = process.env.AHA_FALLBACK_AGENT_MODEL;
+        if (!isAllowedModelId(process.env.AHA_FALLBACK_AGENT_MODEL)) {
+            logger.error(`[runClaude] REJECTED fallback model override from env: '${process.env.AHA_FALLBACK_AGENT_MODEL}'. Only 'claude-' prefix allowed. Clearing.`);
+        } else {
+            metadata.fallbackModelOverride = process.env.AHA_FALLBACK_AGENT_MODEL;
+        }
     }
     // Priority: AHA_SESSION_NAME > AHA_ROOM_NAME
     metadata.name = process.env.AHA_SESSION_NAME || process.env.AHA_ROOM_NAME;

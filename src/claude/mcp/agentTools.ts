@@ -58,6 +58,7 @@ import { emitTraceEvent } from '@/trace/traceEmitter';
 import { TraceEventKind } from '@/trace/traceTypes';
 import { McpToolContext, ReplaceAgentStageError } from './mcpContext';
 import { HELP_POOL_MAX } from '@/daemon/helpAutoSpawn';
+import { validateModelIds } from '../utils/validateModelId';
 
 /**
  * Count active help-agent members in a team roster (best-effort, returns 0 on failure).
@@ -454,6 +455,17 @@ The \`prompt\` field is injected as the agent's initial task context. Write it a
                 }
             }
 
+            // Model ID whitelist: validate model param before injecting into env
+            if (args.model) {
+                const modelCheck = validateModelIds(args.model);
+                if (!modelCheck.valid) {
+                    return {
+                        content: [{ type: 'text', text: `Error: Model ID must start with 'claude-'. Rejected: ${modelCheck.rejected.join(', ')}.` }],
+                        isError: true,
+                    };
+                }
+            }
+
             // Generate and carry member identity as a pair so create_agent
             // cannot regress into a partial refactor where sessionTag is used
             // before it exists.
@@ -842,16 +854,10 @@ The \`prompt\` field is injected as the agent's initial task context. Write it a
             }
             // Model ID whitelist: only Claude model IDs are allowed to prevent
             // accidental cost leakage via non-anthropic providers (e.g. glm-*).
-            const ALLOWED_MODEL_PREFIX = 'claude-';
-            if (!args.modelId.startsWith(ALLOWED_MODEL_PREFIX)) {
+            const modelCheck = validateModelIds(args.modelId, args.fallbackModelId);
+            if (!modelCheck.valid) {
                 return {
-                    content: [{ type: 'text', text: `Error: modelId must start with '${ALLOWED_MODEL_PREFIX}'. Got '${args.modelId}'. Use modelRouter for non-anthropic providers.` }],
-                    isError: true,
-                };
-            }
-            if (args.fallbackModelId && !args.fallbackModelId.startsWith(ALLOWED_MODEL_PREFIX)) {
-                return {
-                    content: [{ type: 'text', text: `Error: fallbackModelId must start with '${ALLOWED_MODEL_PREFIX}'. Got '${args.fallbackModelId}'.` }],
+                    content: [{ type: 'text', text: `Error: Model ID must start with 'claude-'. Rejected: ${modelCheck.rejected.join(', ')}. Use modelRouter for non-anthropic providers.` }],
                     isError: true,
                 };
             }
@@ -1433,6 +1439,17 @@ The \`prompt\` field is injected as the agent's initial task context. Write it a
                         text: `Spawn delegation: Role "${role || 'unknown'}" cannot batch-spawn agents. A delegation task has been created for Master.`,
                     }],
                     isError: false,
+                };
+            }
+
+            // Model ID whitelist: validate all model params in batch before spawning
+            const batchModelRejects = args.agents
+                .filter(a => a.model && !validateModelIds(a.model).valid)
+                .map(a => `${a.role}: ${a.model}`);
+            if (batchModelRejects.length > 0) {
+                return {
+                    content: [{ type: 'text', text: `Error: Model IDs must start with 'claude-'. Rejected: ${batchModelRejects.join('; ')}.` }],
+                    isError: true,
                 };
             }
 
