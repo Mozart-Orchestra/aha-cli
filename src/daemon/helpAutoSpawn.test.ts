@@ -245,6 +245,75 @@ describe('checkHelpAutoSpawn', () => {
 
     expect(requestHelp).not.toHaveBeenCalled();
   });
+
+  it('Layer 5: initialNow prevents replay of historical @help messages on daemon restart', async () => {
+    const teamId = 'team-l5';
+    const daemonStart = Date.now();
+    const oldTs = daemonStart - 300_000; // 5 min before daemon started
+    const recentTs = daemonStart + 1000;  // 1s after daemon started
+    makeTeamDir(tmpDir, teamId, [
+      makeMessage('@help old request from previous session', oldTs),
+      makeMessage('@help new request after restart', recentTs),
+    ]);
+
+    // Simulate daemon restart: initialize with daemon start time
+    const state = createHelpAutoSpawnState(daemonStart);
+
+    await checkHelpAutoSpawn({
+      activeTeamIds: [teamId],
+      sessions: [],
+      state,
+      requestHelp,
+      cwd: tmpDir,
+      now: daemonStart + 5000,
+    });
+
+    // Should spawn from the recent message, NOT from the old one
+    expect(requestHelp).toHaveBeenCalledOnce();
+    expect(requestHelp).toHaveBeenCalledWith(expect.objectContaining({ teamId }));
+  });
+
+  it('Layer 5: initialNow=0 (default) still reads all history for backward compat', async () => {
+    const teamId = 'team-l5-compat';
+    const now = Date.now();
+    makeTeamDir(tmpDir, teamId, [makeMessage('@help old message', now - 500_000)]);
+
+    const state = createHelpAutoSpawnState(); // no initialNow → defaults to 0
+    await checkHelpAutoSpawn({
+      activeTeamIds: [teamId],
+      sessions: [],
+      state,
+      requestHelp,
+      cwd: tmpDir,
+      now,
+    });
+
+    expect(requestHelp).toHaveBeenCalledOnce();
+  });
+
+  it('Layer 4: serverHelpCountFn mismatch is diagnostic-only and does not block spawn', async () => {
+    const teamId = 'team-l4';
+    const now = Date.now();
+    makeTeamDir(tmpDir, teamId, [makeMessage('@help needed', now - 1000)]);
+
+    const serverHelpCountFn = vi.fn().mockResolvedValue(18); // server says 18 help-agents
+
+    const state = createHelpAutoSpawnState();
+    await checkHelpAutoSpawn({
+      activeTeamIds: [teamId],
+      sessions: [],          // local count = 0
+      state,
+      requestHelp,
+      serverHelpCountFn,
+      poolMax: 2,
+      cwd: tmpDir,
+      now,
+    });
+
+    // Should still spawn because pool cap uses LOCAL count (0), not server count (18)
+    expect(requestHelp).toHaveBeenCalledOnce();
+    expect(serverHelpCountFn).toHaveBeenCalledWith(teamId);
+  });
 });
 
 describe('countActiveHelpAgents', () => {
