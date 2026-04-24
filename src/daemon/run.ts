@@ -69,6 +69,7 @@ import {
   recoverExistingSessions,
   signalRecoveryComplete,
   onHeartbeatPrunedSession,
+  poolCountTracker,
 } from './sessionManager';
 
 import { runHeartbeatCycle } from './heartbeat';
@@ -742,6 +743,8 @@ export async function startDaemon(): Promise<void> {
     // supervisor spawn immediately instead of waiting N * heartbeatIntervalMs.
     let heartbeatCount = supervisorInterval - 1;
     const helpAutoSpawnState = createHelpAutoSpawnState(Date.now());
+    // Wire event-sourced pool counter into auto-spawn state for O(1) pre-checks.
+    helpAutoSpawnState.poolCountTracker = poolCountTracker;
 
     // ── Heartbeat interval ─────────────────────────────────────────────────────
     // Every heartbeatIntervalMs (default 60s):

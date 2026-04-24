@@ -72,6 +72,10 @@ const helpAgentLeaseExpiryByTeam = new Map<string, Map<string, number>>();
 const HELP_AGENT_POOL_MAX = 2;
 const HELP_AGENT_LEASE_MS = 10 * 60 * 1000;
 
+// Event-sourced pool count tracker — O(1) per-role-per-team agent counts.
+import { createPoolCountTracker, type PoolCountTracker } from './poolCountTracker';
+export const poolCountTracker: PoolCountTracker = createPoolCountTracker();
+
 function normalizeReportedRuntime(value: unknown): SpawnSessionOptions['agent'] | null {
   if (value === 'claude' || value === 'codex' || value === 'ralph') {
     return value;
@@ -515,6 +519,14 @@ export async function recoverExistingSessions(api?: ApiClient): Promise<number> 
         `[SESSION MANAGER] Recovered ${recovered} sessions after daemon restart ` +
         `(${resolved} resolved, ${unresolved} unresolved)`
       );
+      // Rebuild pool counter from recovered sessions.
+      poolCountTracker.resetFromSnapshot(
+        [...pidToTrackedSession.values()].map(s => ({
+          pid: s.pid,
+          role: s.ahaSessionMetadataFromLocalWebhook?.role,
+          teamId: s.ahaSessionMetadataFromLocalWebhook?.teamId ?? s.ahaSessionMetadataFromLocalWebhook?.roomId,
+        })),
+      );
     }
   } catch (error) {
     logger.debug(`[SESSION MANAGER] Session recovery scan failed: ${error instanceof Error ? error.message : 'unknown'}`);
@@ -627,6 +639,8 @@ export const onAhaSessionWebhook = (sessionId: string, sessionMetadata: Metadata
       base: existingSession.spawnOptions,
     });
     logger.debug(`[SESSION MANAGER] Updated daemon-spawned session ${sessionId} with metadata`);
+    // Pool tracker: daemon-spawned sessions get role/teamId from webhook.
+    poolCountTracker.onTracked(pid, sessionMetadata?.teamId ?? sessionMetadata?.roomId, sessionMetadata?.role);
     void finalizeRunEnvelopeFromWebhook({
       pid,
       sessionId,
@@ -677,6 +691,8 @@ export const onAhaSessionWebhook = (sessionId: string, sessionMetadata: Metadata
       base: existingSession.spawnOptions,
     });
     existingSession.startedBy = 'daemon'; // Normalize so future webhooks follow the standard path
+    // Update pool tracker with resolved metadata (role/teamId may differ from recovery guess).
+    poolCountTracker.onTracked(pid, sessionMetadata?.teamId ?? sessionMetadata?.roomId, sessionMetadata?.role);
     logger.debug(
       `[SESSION MANAGER] Self-healed recovered session: ${previousId || '(unresolved)'} → ${sessionId} ` +
       `(PID: ${pid}, role: ${sessionMetadata.role || 'unknown'})`
@@ -699,6 +715,7 @@ export const onAhaSessionWebhook = (sessionId: string, sessionMetadata: Metadata
       pid,
     };
     pidToTrackedSession.set(pid, trackedSession);
+    poolCountTracker.onTracked(pid, sessionMetadata?.teamId ?? sessionMetadata?.roomId, sessionMetadata?.role);
     void finalizeRunEnvelopeFromWebhook({
       pid,
       sessionId,
@@ -1135,6 +1152,7 @@ export const stopSession = (sessionId: string): boolean => {
         _onSessionDead([session.ahaSessionId]);
       }
       pidToTrackedSession.delete(pid);
+      poolCountTracker.onUntracked(pid);
       logger.debug(`[SESSION MANAGER] Removed session ${sessionId} from tracking`);
       return true;
     }
@@ -1177,6 +1195,7 @@ export const stopTeamSessions = (teamId: string): { stopped: number; errors: str
           deadSessionIds.push(session.ahaSessionId);
         }
         pidToTrackedSession.delete(pid);
+        poolCountTracker.onUntracked(pid);
         stopped++;
         logger.debug(`[SESSION MANAGER] Stopped team session ${sessionId}`);
       } catch (error) {
@@ -1498,6 +1517,7 @@ export const onChildExited = (pid: number): void => {
   const tracked = pidToTrackedSession.get(pid);
   logger.debug(`[SESSION MANAGER] Removing exited process PID ${pid} from tracking`);
   pidToTrackedSession.delete(pid);
+  poolCountTracker.onUntracked(pid);
 
   const teamId = tracked?.ahaSessionMetadataFromLocalWebhook?.teamId || tracked?.ahaSessionMetadataFromLocalWebhook?.roomId;
   if (teamId && tracked?.ahaSessionId) {

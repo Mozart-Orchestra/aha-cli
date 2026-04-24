@@ -58,6 +58,11 @@ export interface HelpAutoSpawnState {
    * to give pidToTrackedSession time to stabilize after daemon restart.
    */
   recoveryCompletedAt: number | null;
+  /**
+   * Optional event-sourced pool counter for O(1) pre-checks.
+   * When provided, used as a fast skip before full PID-liveness scan.
+   */
+  poolCountTracker?: import('./poolCountTracker').PoolCountTracker;
 }
 
 export type RequestHelpFn = (params: {
@@ -232,11 +237,21 @@ export async function checkHelpAutoSpawn(params: {
 
     if (!hasHelpRequest) continue;
 
-    // Pool cap check — local PID-based count is the authoritative source.
+    // Pool cap check — event-sourced counter provides O(1) fast path,
+    // full PID-liveness scan is the authoritative source.
     // Server roster is logged for diagnostics but NOT used for blocking because
     // server-side member records are never cleaned up when sessions die
     // (lifecycle.runStatus stays 'active' indefinitely).
-    const localHelpCount = countActiveHelpAgents(sessions, teamId);
+    const trackerCount = state.poolCountTracker?.getCount(teamId, 'help-agent') ?? -1;
+    let localHelpCount: number;
+
+    if (trackerCount >= poolMax) {
+      // Fast path: event-sourced counter says pool is full, skip full scan.
+      localHelpCount = trackerCount;
+    } else {
+      // Authoritative: full PID-liveness scan.
+      localHelpCount = countActiveHelpAgents(sessions, teamId);
+    }
     const activeHelpCount = localHelpCount;
 
     if (serverHelpCountFn) {
