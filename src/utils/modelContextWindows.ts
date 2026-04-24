@@ -1,22 +1,22 @@
 export const DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS = 200_000;
-export const CLAUDE_1M_CONTEXT_WINDOW_TOKENS = 1_000_000;
 
 export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
-    // Claude Code runs all current-gen models with 1M context window
-    // Updated 2026-03-21 per user confirmation (Claude Code = 1M, not 200K)
+    // Anthropic API runtime enforces 200K context window for Claude 4 models
+    // despite marketing claims of 1M. The actual limit is observed in usage data
+    // as contextWindow: 200000. Exceeding this triggers 400 invalid_request_error.
     'claude-opus-4': DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS,
     'claude-opus-4-1': DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS,
-    'claude-opus-4-6': CLAUDE_1M_CONTEXT_WINDOW_TOKENS,
-    'claude-opus-4-20250514': CLAUDE_1M_CONTEXT_WINDOW_TOKENS,
+    'claude-opus-4-6': DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS,
+    'claude-opus-4-20250514': DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS,
     'claude-sonnet-4': DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS,
-    'claude-sonnet-4-6': CLAUDE_1M_CONTEXT_WINDOW_TOKENS,
-    'claude-sonnet-4-20250514': CLAUDE_1M_CONTEXT_WINDOW_TOKENS,
+    'claude-sonnet-4-6': DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS,
+    'claude-sonnet-4-20250514': DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS,
     'claude-haiku-4': DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS,
-    'claude-haiku-4-6': CLAUDE_1M_CONTEXT_WINDOW_TOKENS,
-    // Explicit [1m] variants retained for backward compat
-    'claude-opus-4-6[1m]': CLAUDE_1M_CONTEXT_WINDOW_TOKENS,
-    'claude-sonnet-4-6[1m]': CLAUDE_1M_CONTEXT_WINDOW_TOKENS,
-    'claude-haiku-4-6[1m]': CLAUDE_1M_CONTEXT_WINDOW_TOKENS,
+    'claude-haiku-4-6': DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS,
+    // Explicit [1m] variants retained for backward compat but capped at 200K
+    'claude-opus-4-6[1m]': DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS,
+    'claude-sonnet-4-6[1m]': DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS,
+    'claude-haiku-4-6[1m]': DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS,
 };
 
 export function resolveContextWindowTokens(modelId?: string | null): number | undefined {

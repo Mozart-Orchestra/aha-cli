@@ -77,10 +77,12 @@ import {
     seedCodexHomeSkillUnion,
 } from './codexHome';
 import {
+    buildCodexTeamContextMessage,
     buildCodexCustomSystemPromptBlock,
     buildCodexToolAccessInstruction,
     buildSkillsAwarenessPrompt,
     composeCodexBaseInstructions,
+    summarizeCodexTeamHistory,
 } from './runtimePromptAdapter';
 import { findCodexTranscriptFile, findMostRecentCodexTranscriptFile } from '@/claude/utils/runtimeLogReader';
 import { computeEffectiveAllowedToolsFromMetadata, hasDynamicGrantOptIn } from '@/claude/utils/temporaryToolGrants';
@@ -853,8 +855,8 @@ export async function runCodex(opts: {
             messageQueue.push(`[System]: ${updates.join(' ')}`, getCurrentEnhancedMode());
             teamInitialized = false;
 
-            // Rebuild team context block so next session start injects updated context
-            // (mirrors Claude branch behavior in updateTeamHandling)
+            // team context 更新只作为一次性普通消息入队。
+            // 不再保存动态 team context 供 base-instructions 重复注入。
             if (nextTeamId && nextRole && taskStateManager) {
                 try {
                     const kanbanCtx = await taskStateManager.getFilteredContext();
@@ -868,15 +870,21 @@ export async function runCodex(opts: {
                         kanbanCtx,
                         agentImage ?? undefined
                     );
-                    teamContextBlock = rebuiltRolePrompt;
+                    const rebuiltTeamContextMessage = buildCodexTeamContextMessage({
+                        rolePrompt: rebuiltRolePrompt,
+                        teamName: metadata.name || 'Team',
+                        historyText: '(Team metadata changed; call get_team_info/list_tasks for the latest roster and board state.)',
+                    });
+                    if (rebuiltTeamContextMessage) {
+                        messageQueue.push(`[System Team Context Update]\n${rebuiltTeamContextMessage}`, getCurrentEnhancedMode());
+                    }
                     teamInitialized = true;
-                    logger.debug('[Codex] Rebuilt teamContextBlock after metadata-update');
+                    logger.debug('[Codex] Queued one-shot team context update after metadata-update');
                 } catch (e) {
-                    logger.debug('[Codex] Failed to rebuild teamContextBlock:', e);
-                    teamContextBlock = null;
+                    logger.debug('[Codex] Failed to queue team context update:', e);
                 }
             } else {
-                teamContextBlock = null;
+                teamInitialized = false;
             }
         }
     });
@@ -964,9 +972,9 @@ export async function runCodex(opts: {
     session.keepAlive(thinking, 'remote');
     // Periodic keep-alive; store handle so we can clear on exit
     const keepAliveInterval = setInterval(() => {
-        if (!runtimeHealthy) {
-            return;
-        }
+        // Liveness belongs to the Aha wrapper, not the inner Codex turn.
+        // Keep heartbeats flowing after a Codex runtime error so the daemon can
+        // reconnect/self-heal instead of letting the UI mark the agent dead.
         session.keepAlive(thinking, 'remote');
     }, 2000);
 
@@ -1764,7 +1772,6 @@ export async function runCodex(opts: {
     let statusReporter: StatusReporter | undefined;
     let teamStorage: TeamMessageStorage | undefined;
     let teamInitialized = false;
-    let teamContextBlock: string | null = null;
 
     if (teamId && role) {
         logger.debug(`[Codex] Team mode detected: teamId=${teamId}, role=${role}`);
@@ -1882,13 +1889,12 @@ export async function runCodex(opts: {
             }
 
             // Get recent messages for context
+            // Limit to 10 messages (matching Claude's summarizeHistory behavior)
+            // to prevent context bloat on spawn. summarizeCodexTeamHistory further
+            // truncates each message to 160 chars.
             try {
-                const recentMessages = await teamStorage.getRecentContext(teamId, 20);
-                if (recentMessages && recentMessages.length > 0) {
-                    historyText = recentMessages.map((m: any) =>
-                        `[${m.fromRole || 'unknown'}] ${m.content?.substring(0, 100)}...`
-                    ).join('\n');
-                }
+                const recentMessages = await teamStorage.getRecentContext(teamId, 10);
+                historyText = summarizeCodexTeamHistory(recentMessages, 10);
             } catch (e) {
                 logger.debug('[Codex] Failed to get recent messages:', e);
             }
@@ -1913,15 +1919,18 @@ export async function runCodex(opts: {
                 agentImage ?? undefined
             );
 
-            const recentTeamActivityBlock = trimIdent(`
-## Team Name
-${teamName}
-
-## Recent Team Activity
-${historyText}
-`);
-
-            teamContextBlock = [sharedRolePrompt, recentTeamActivityBlock].join('\n\n');
+            const teamContextMessage = buildCodexTeamContextMessage({
+                rolePrompt: sharedRolePrompt,
+                teamName,
+                historyText,
+            });
+            if (teamContextMessage) {
+                // team context 只作为一次性 conversation input 注入。
+                // 不再嵌入 Codex base-instructions，避免每次 session start/restart 膨胀。
+                // 用 unshift 保留 pending user/task prompt，同时确保 context 先出现。
+                messageQueue.unshift(teamContextMessage, getCurrentEnhancedMode());
+                logger.debug('[Codex] Queued one-shot team context message');
+            }
 
             teamInitialized = true;
             logger.debug('[Codex] Team initialization complete');
@@ -2062,20 +2071,20 @@ ${historyText}
                         instructionBlocks.push(toolAccessInstruction);
                     }
 
-                    // Inject team context if initialized (this includes role, responsibilities, kanban state, required actions)
-                    if (teamInitialized && teamContextBlock) {
-                        instructionBlocks.push(teamContextBlock);
-                    } else if (metadata.role) {
+                    // team context 在初始化/metadata update 时只作为一次性消息入队。
+                    // 不放入 base-instructions：Codex 会跨 session start/restart
+                    // 携带 base instructions，动态 team/chat context 放进去会持续膨胀。
+                    if (!teamInitialized && metadata.role) {
                         // Fallback: basic role instruction if team initialization failed
                         instructionBlocks.push(
                             `You are a ${metadata.role} in a collaborative team. Coordinate with other agents via the shared Kanban board and keep task statuses accurate.`
                         );
                     }
 
-                    // Inject agent-image memory (learnings, patterns, scope, etc.)
-                    if (agentImageInjectionBlock && !teamInitialized) {
-                        instructionBlocks.push(agentImageInjectionBlock);
-                    }
+                    // Agent-image memory (learnings, patterns, scope, etc.) is already
+                    // included inside sharedRolePrompt via generateRolePrompt ->
+                    // buildAgentImageInjection. Do NOT inject agentImageInjectionBlock
+                    // again here — it duplicates genome content and inflates context.
 
                     if (desktopKanbanInstructionBlock) {
                         instructionBlocks.push(desktopKanbanInstructionBlock);
@@ -2188,9 +2197,7 @@ Always reflect progress on the board and call these tools whenever you start or 
                 reasoningProcessor.abort();  // Use abort to properly finish any in-progress tool calls
                 diffProcessor.reset();
                 thinking = false;
-                if (runtimeHealthy) {
-                    session.keepAlive(thinking, 'remote');
-                }
+                session.keepAlive(thinking, 'remote');
                 emitReadyIfIdle({
                     pending,
                     queueSize: () => messageQueue.size(),

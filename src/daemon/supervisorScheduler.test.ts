@@ -12,6 +12,7 @@ const mockListSupervisorStates = vi.hoisted(() => vi.fn());
 const mockReadSupervisorState = vi.hoisted(() => vi.fn());
 const mockUpdateSupervisorState = vi.hoisted(() => vi.fn());
 const mockUpdateSupervisorRun = vi.hoisted(() => vi.fn());
+const mockDeleteSupervisorState = vi.hoisted(() => vi.fn());
 
 vi.mock('axios', () => ({
     default: {
@@ -28,6 +29,7 @@ vi.mock('@/configuration', () => ({
 }));
 
 vi.mock('./supervisorState', () => ({
+    deleteSupervisorState: mockDeleteSupervisorState,
     getPendingActionRetryDelayMs: (retryCount: number, baseMs = 60_000) => baseMs * (2 ** Math.max(0, retryCount)),
     listSupervisorStates: mockListSupervisorStates,
     readSupervisorState: mockReadSupervisorState,
@@ -36,7 +38,7 @@ vi.mock('./supervisorState', () => ({
     updateSupervisorState: mockUpdateSupervisorState,
 }));
 
-import { runSupervisorCycle } from './supervisorScheduler';
+import { isTeamNotFoundError, runSupervisorCycle } from './supervisorScheduler';
 
 describe('supervisorScheduler', () => {
     beforeEach(() => {
@@ -46,6 +48,7 @@ describe('supervisorScheduler', () => {
         mockReadSupervisorState.mockReset();
         mockUpdateSupervisorState.mockReset();
         mockUpdateSupervisorRun.mockReset();
+        mockDeleteSupervisorState.mockReset();
         delete process.env.AHA_SUPERVISOR_SCAN_ALL_TEAMS;
         delete process.env.AHA_SUPERVISOR_SCAN_IDLE_STATES;
 
@@ -67,6 +70,7 @@ describe('supervisorScheduler', () => {
         }));
         mockUpdateSupervisorState.mockImplementation(async (_teamId: string, updater: (state: any) => any) => updater(mockReadSupervisorState('team-1')));
         mockUpdateSupervisorRun.mockResolvedValue(mockReadSupervisorState('team-1'));
+        mockDeleteSupervisorState.mockReturnValue(true);
     });
 
     it('spawns a supervisor for teams with unfinished tasks even when no live mainline agent remains', async () => {
@@ -434,6 +438,102 @@ describe('supervisorScheduler', () => {
         }));
     });
 
+    it('respawns zombie persisted PID using tracked session identity when state lastSessionId is missing', async () => {
+        const zombieState = {
+            teamId: 'team-1',
+            lastRunAt: 0,
+            teamLogCursor: 0,
+            ccLogCursors: {},
+            codexHistoryCursor: 0,
+            codexSessionCursors: {},
+            lastConclusion: '',
+            lastSessionId: null,
+            terminated: false,
+            idleRuns: 0,
+            lastSupervisorPid: 22222,
+            pendingAction: null,
+            pendingActionMeta: null,
+        };
+        mockReadSupervisorState.mockReturnValue(zombieState);
+        mockAxiosGet.mockImplementation(async (url: string) => {
+            if (url === 'https://server.test/v1/teams/team-1/tasks') {
+                return {
+                    data: {
+                        tasks: [{ id: 'task-1', status: 'todo' }],
+                    },
+                };
+            }
+
+            if (url.includes('/genomes/%40official/supervisor')) {
+                return {
+                    data: {
+                        genome: { id: 'spec-supervisor' },
+                    },
+                };
+            }
+
+            throw new Error(`Unexpected axios.get call: ${url}`);
+        });
+
+        const spawnSession = vi.fn().mockResolvedValue({
+            type: 'success',
+            sessionId: 'supervisor-session-new',
+        });
+        const processKill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+
+        try {
+            await runSupervisorCycle({
+                pidToTrackedSession: new Map([
+                    [11, {
+                        pid: 11,
+                        ahaSessionId: 'mainline-session',
+                        ahaSessionMetadataFromLocalWebhook: {
+                            teamId: 'team-1',
+                            role: 'implementer',
+                            executionPlane: 'mainline',
+                            path: '/repo',
+                        },
+                    } as any],
+                    [22222, {
+                        pid: 22222,
+                        ahaSessionId: 'tracked-supervisor-session-dead',
+                        ahaSessionMetadataFromLocalWebhook: {
+                            teamId: 'team-1',
+                            role: 'supervisor',
+                            executionPlane: 'bypass',
+                        },
+                    } as any],
+                ]),
+                teamHeartbeats: new Map([
+                    ['team-1', {
+                        getDeadAgents: () => [{
+                            agentId: 'tracked-supervisor-session-dead',
+                            role: 'supervisor',
+                            lastSeen: Date.now() - 120_000,
+                            orphanedTasks: [],
+                            deadForMs: 120_000,
+                        }],
+                    } as any],
+                ]),
+                heartbeatCount: 20,
+                supervisorInterval: 20,
+                supervisorTerminateIdleMs: 60_000,
+                pendingActionBaseRetryMs: 60_000,
+                heartbeatIntervalMs: 3_000,
+                credentialsToken: 'token-1',
+                spawnSession,
+                requestHelp: vi.fn(),
+            });
+
+            expect(processKill).toHaveBeenCalledWith(22222, 'SIGTERM');
+        } finally {
+            processKill.mockRestore();
+        }
+
+        expect(mockUpdateSupervisorRun).toHaveBeenCalledWith('team-1', { lastSupervisorPid: 0 });
+        expect(spawnSession).toHaveBeenCalledTimes(1);
+    });
+
     it('does not terminate a team when task summary lookup fails', async () => {
         const staleState = {
             teamId: 'team-1',
@@ -471,6 +571,56 @@ describe('supervisorScheduler', () => {
             'team-1',
             expect.any(Function),
         );
+        expect(mockDeleteSupervisorState).not.toHaveBeenCalled();
+    });
+
+    it('任务摘要返回团队 404 时删除陈旧 supervisor state', async () => {
+        const staleState = {
+            teamId: 'ghost-team',
+            lastRunAt: Date.now() - 120_000,
+            teamLogCursor: 0,
+            ccLogCursors: {},
+            codexHistoryCursor: 0,
+            codexSessionCursors: {},
+            lastConclusion: '',
+            lastSessionId: null,
+            terminated: false,
+            idleRuns: 0,
+            lastSupervisorPid: 0,
+            pendingAction: null,
+            pendingActionMeta: null,
+        };
+
+        process.env.AHA_SUPERVISOR_SCAN_IDLE_STATES = '1';
+        mockListSupervisorStates.mockReturnValue([staleState]);
+        mockReadSupervisorState.mockReturnValue(staleState);
+        mockAxiosGet.mockRejectedValue({
+            response: { status: 404 },
+            message: 'Request failed with status code 404',
+        });
+
+        await runSupervisorCycle({
+            pidToTrackedSession: new Map(),
+            heartbeatCount: 1,
+            supervisorInterval: 20,
+            supervisorTerminateIdleMs: 60_000,
+            pendingActionBaseRetryMs: 60_000,
+            heartbeatIntervalMs: 3_000,
+            credentialsToken: 'token-1',
+            spawnSession: vi.fn(),
+            requestHelp: vi.fn(),
+        });
+
+        expect(mockDeleteSupervisorState).toHaveBeenCalledWith('ghost-team');
+        expect(mockLogger.debug).toHaveBeenCalledWith(
+            expect.stringContaining('已删除缺失团队 ghost-team 的陈旧 supervisor state'),
+        );
+    });
+
+    it('识别服务端返回的 team-not-found 错误', () => {
+        expect(isTeamNotFoundError({ response: { status: 404 } })).toBe(true);
+        expect(isTeamNotFoundError({ response: { status: 500 } })).toBe(false);
+        expect(isTeamNotFoundError(new Error('404'))).toBe(false);
     });
 
     it('keeps pendingAction when help reuse is saturated and schedules another retry', async () => {

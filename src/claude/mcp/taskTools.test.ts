@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
     buildShowAllTaskPage,
+    collectForeignActiveExecutionLockSessionIdsForAssignee,
+    collectReleasableOverlapExecutionLockSessionIdsForAssignee,
+    hasActiveExecutionLinkForSelf,
     isRetryableTaskSessionMismatchError,
+    parseOverlappingActiveWorkTaskId,
     resolveCreateTaskPolicy,
     resolveTaskActorSessionId,
     runWithTaskSessionFallback,
@@ -101,6 +105,10 @@ describe('summarizeTaskForList', () => {
             blockers: [{}],
             acceptanceCriteria: ['a', 'b'],
             subtaskIds: ['sub-1'],
+            executionLinks: [
+                { sessionId: 'old-primary', role: 'primary', status: 'active' },
+                { sessionId: 'done-primary', role: 'primary', status: 'completed' },
+            ],
         });
 
         expect(summary).toEqual({
@@ -120,6 +128,11 @@ describe('summarizeTaskForList', () => {
             blockerCount: 1,
             acceptanceCriteriaCount: 2,
             subtaskCount: 1,
+            activeExecutionLocks: [{
+                sessionId: 'old-primary',
+                role: 'primary',
+                status: 'active',
+            }],
         });
     });
 });
@@ -289,5 +302,170 @@ describe('task session fallback retry helpers', () => {
             attemptedSessionId: 'client',
             error: new Error('Invalid actor session for this team'),
         })).toBe(false);
+    });
+});
+
+describe('collectForeignActiveExecutionLockSessionIdsForAssignee', () => {
+    it('returns foreign active lock holders when the task is assigned to the current agent', () => {
+        const result = collectForeignActiveExecutionLockSessionIdsForAssignee({
+            assigneeId: 'current-session',
+            executionLinks: [
+                { sessionId: 'stale-session', status: 'active' },
+                { sessionId: 'current-session', status: 'active' },
+            ],
+        }, ['current-session']);
+
+        expect(result).toEqual(['stale-session']);
+    });
+
+    it('dedupes foreign lock holders and ignores non-active links', () => {
+        const result = collectForeignActiveExecutionLockSessionIdsForAssignee({
+            assigneeId: 'server-session',
+            executionLinks: [
+                { sessionId: 'old-session', status: 'active' },
+                { sessionId: 'old-session', status: 'active' },
+                { sessionId: 'support-session', role: 'supporting', status: 'active' },
+                { sessionId: 'done-session', status: 'completed' },
+                { sessionId: 'abandoned-session', status: 'abandoned' },
+                { sessionId: '', status: 'active' },
+            ],
+        }, ['server-session', 'local-session']);
+
+        expect(result).toEqual(['old-session']);
+    });
+
+    it('does not collect locks for unassigned tasks or tasks assigned to another agent', () => {
+        expect(collectForeignActiveExecutionLockSessionIdsForAssignee({
+            assigneeId: null,
+            executionLinks: [{ sessionId: 'old-session', status: 'active' }],
+        }, ['current-session'])).toEqual([]);
+
+        expect(collectForeignActiveExecutionLockSessionIdsForAssignee({
+            assigneeId: 'other-session',
+            executionLinks: [{ sessionId: 'old-session', status: 'active' }],
+        }, ['current-session'])).toEqual([]);
+    });
+
+    it('supports both preferred AHA session id and local client session id as self candidates', () => {
+        const result = collectForeignActiveExecutionLockSessionIdsForAssignee({
+            assigneeId: 'aha-session',
+            executionLinks: [
+                { sessionId: 'aha-session', status: 'active' },
+                { sessionId: 'client-session', status: 'active' },
+                { sessionId: 'legacy-session', status: 'active' },
+            ],
+        }, ['aha-session', 'client-session']);
+
+        expect(result).toEqual(['legacy-session']);
+    });
+});
+
+describe('hasActiveExecutionLinkForSelf', () => {
+    it('allows an active primary execution owner to mutate an unassigned task', () => {
+        const result = hasActiveExecutionLinkForSelf({
+            assigneeId: null,
+            executionLinks: [
+                { sessionId: 'current-session', role: 'primary', status: 'active' },
+            ],
+        }, ['current-session']);
+
+        expect(result).toBe(true);
+    });
+
+    it('does not treat completed, supporting, or foreign links as ownership', () => {
+        expect(hasActiveExecutionLinkForSelf({
+            executionLinks: [
+                { sessionId: 'current-session', role: 'primary', status: 'completed' },
+            ],
+        }, ['current-session'])).toBe(false);
+
+        expect(hasActiveExecutionLinkForSelf({
+            executionLinks: [
+                { sessionId: 'current-session', role: 'supporting', status: 'active' },
+            ],
+        }, ['current-session'])).toBe(false);
+
+        expect(hasActiveExecutionLinkForSelf({
+            executionLinks: [
+                { sessionId: 'other-session', role: 'primary', status: 'active' },
+            ],
+        }, ['current-session'])).toBe(false);
+    });
+});
+
+describe('overlap execution lock helpers', () => {
+    it('parses overlapping active work task id from start_task errors', () => {
+        expect(parseOverlappingActiveWorkTaskId('Task overlaps with active work on C5cxUlrKVe7u')).toBe('C5cxUlrKVe7u');
+        expect(parseOverlappingActiveWorkTaskId(new Error('Failed to start task: Task overlaps with active work on abc_123'))).toBe('abc_123');
+        expect(parseOverlappingActiveWorkTaskId('Task already being executed')).toBeNull();
+    });
+
+    it('releases stale overlap locks only when the target task is assigned to self', () => {
+        const result = collectReleasableOverlapExecutionLockSessionIdsForAssignee({
+            targetTask: { assigneeId: 'current-session' },
+            overlapTask: {
+                status: 'in-progress',
+                assigneeId: 'old-owner',
+                executionLinks: [
+                    { sessionId: 'old-owner', role: 'primary', status: 'active' },
+                    { sessionId: 'supporting-agent', role: 'supporting', status: 'active' },
+                    { sessionId: 'done-agent', role: 'primary', status: 'completed' },
+                ],
+            },
+            sessionCandidates: ['current-session'],
+            runningSessionIds: ['current-session'],
+        });
+
+        expect(result).toEqual(['old-owner']);
+    });
+
+    it('does not release overlap locks held by a running foreign owner on an in-progress task', () => {
+        const result = collectReleasableOverlapExecutionLockSessionIdsForAssignee({
+            targetTask: { assigneeId: 'current-session' },
+            overlapTask: {
+                status: 'in-progress',
+                assigneeId: 'other-running-owner',
+                executionLinks: [
+                    { sessionId: 'other-running-owner', role: 'primary', status: 'active' },
+                ],
+            },
+            sessionCandidates: ['current-session'],
+            runningSessionIds: ['other-running-owner'],
+        });
+
+        expect(result).toEqual([]);
+    });
+
+    it('releases overlap locks for non-in-progress duplicate work even if the old owner is still visible', () => {
+        const result = collectReleasableOverlapExecutionLockSessionIdsForAssignee({
+            targetTask: { assigneeId: 'current-session' },
+            overlapTask: {
+                status: 'review',
+                assigneeId: 'other-running-owner',
+                executionLinks: [
+                    { sessionId: 'other-running-owner', role: 'primary', status: 'active' },
+                ],
+            },
+            sessionCandidates: ['current-session'],
+            runningSessionIds: ['other-running-owner'],
+        });
+
+        expect(result).toEqual(['other-running-owner']);
+    });
+
+    it('does not release overlap locks if the target task is not assigned to self', () => {
+        const result = collectReleasableOverlapExecutionLockSessionIdsForAssignee({
+            targetTask: { assigneeId: 'someone-else' },
+            overlapTask: {
+                status: 'review',
+                executionLinks: [
+                    { sessionId: 'old-owner', role: 'primary', status: 'active' },
+                ],
+            },
+            sessionCandidates: ['current-session'],
+            runningSessionIds: [],
+        });
+
+        expect(result).toEqual([]);
     });
 });

@@ -38,6 +38,7 @@ import { registerTaskTools } from './taskTools';
 import { registerAgentTools } from './agentTools';
 import { registerSupervisorTools } from './supervisorTools';
 import { registerEvolutionTools } from './evolutionTools';
+import { createRepeatedToolCallGuard } from './toolLoopGuard';
 
 export async function startAhaServer(
     api: any,
@@ -46,6 +47,10 @@ export async function startAhaServer(
 ) {
     // Debounced heartbeat ping to daemon — fires at most once per 10s on MCP tool calls
     let lastHeartbeatPing = 0;
+    const repeatedToolCallGuard = createRepeatedToolCallGuard({
+        threshold: 3,
+        windowMs: 60_000,
+    });
     const pingDaemonHeartbeat = async (): Promise<void> => {
         const now = Date.now();
         if (now - lastHeartbeatPing < 10_000) return; // debounce 10s
@@ -99,6 +104,25 @@ export async function startAhaServer(
         mcp.registerTool = (name: string, config: any, handler: any) => {
             return originalRegisterTool(name, config, async (...args: any[]) => {
                 pingDaemonHeartbeat(); // fire-and-forget, debounced 10s
+                const metadata = client.getMetadata();
+                const guardDecision = repeatedToolCallGuard.check({
+                    sessionId: metadata?.ahaSessionId || client.sessionId,
+                    toolName: name,
+                    params: args[0] ?? {},
+                });
+                if (!guardDecision.allowed) {
+                    logger.warn('[ahaMCP] 已阻断重复工具调用', {
+                        sessionId: metadata?.ahaSessionId || client.sessionId,
+                        toolName: name,
+                        count: guardDecision.count,
+                        threshold: guardDecision.threshold,
+                        paramsHash: guardDecision.paramsHash,
+                    });
+                    return {
+                        content: [{ type: 'text', text: guardDecision.message || '重复 MCP 工具调用已被阻断。' }],
+                        isError: true,
+                    };
+                }
                 return handler(...args);
             });
         };

@@ -67,12 +67,44 @@ type ListableTask = {
     blockers?: unknown[];
     acceptanceCriteria?: unknown[];
     subtaskIds?: unknown[];
+    executionLinks?: unknown[];
     depth?: number;
 };
 
 type TaskMutationResult = {
     success: boolean;
     task?: any;
+};
+
+export type TaskExecutionLinkLike = {
+    sessionId?: string | null;
+    role?: string | null;
+    status?: string | null;
+};
+
+export type TaskExecutionLockSnapshot = {
+    id?: string | null;
+    status?: string | null;
+    assigneeId?: string | null;
+    executionLinks?: TaskExecutionLinkLike[] | null;
+};
+
+type TaskLockReleaseRecord = {
+    sessionId: string;
+    unlockedTaskIds: string[];
+};
+
+type TaskLockReleaseApi = {
+    getTask(teamId: string, taskId: string): Promise<TaskExecutionLockSnapshot | null>;
+    releaseSessionTaskLocks(teamId: string, sessionId: string): Promise<{ success: boolean; unlockedTaskIds: string[] }>;
+    addTaskComment(teamId: string, taskId: string, comment: {
+        sessionId: string;
+        role?: string;
+        displayName?: string;
+        type?: 'execution-check' | 'note';
+        content: string;
+    }): Promise<{ success: boolean; task: any }>;
+    getTeam(teamId: string): Promise<{ team: { members: any[] } } | null>;
 };
 
 const TASK_COMMENT_CONTENT_CHUNK_SIZE = 3600;
@@ -254,7 +286,352 @@ export async function runWithTaskSessionFallback<T>(
     }
 }
 
+function normalizeSessionCandidates(sessionCandidates: Iterable<string | null | undefined>): Set<string> {
+    const normalized = new Set<string>();
+    for (const sessionId of sessionCandidates) {
+        const trimmed = typeof sessionId === 'string' ? sessionId.trim() : '';
+        if (trimmed.length > 0) {
+            normalized.add(trimmed);
+        }
+    }
+    return normalized;
+}
+
+export function parseOverlappingActiveWorkTaskId(error: unknown): string | null {
+    const message = error instanceof Error ? error.message : String(error ?? '');
+    const match = message.match(/Task overlaps with active work on ([A-Za-z0-9_-]+)/i);
+    return match?.[1] ?? null;
+}
+
+export function collectForeignActiveExecutionLockSessionIdsForAssignee(
+    task: TaskExecutionLockSnapshot | null | undefined,
+    sessionCandidates: Iterable<string | null | undefined>,
+): string[] {
+    const candidates = normalizeSessionCandidates(sessionCandidates);
+    const assigneeId = typeof task?.assigneeId === 'string' ? task.assigneeId.trim() : '';
+    if (!assigneeId || !candidates.has(assigneeId)) {
+        return [];
+    }
+
+    const foreignSessionIds = new Set<string>();
+    for (const link of task?.executionLinks ?? []) {
+        const linkSessionId = typeof link?.sessionId === 'string' ? link.sessionId.trim() : '';
+        if (!linkSessionId || candidates.has(linkSessionId)) {
+            continue;
+        }
+        if (link?.status !== 'active') {
+            continue;
+        }
+        if (link?.role === 'supporting') {
+            continue;
+        }
+        foreignSessionIds.add(linkSessionId);
+    }
+
+    return [...foreignSessionIds];
+}
+
+export function hasActiveExecutionLinkForSelf(
+    task: TaskExecutionLockSnapshot | null | undefined,
+    sessionCandidates: Iterable<string | null | undefined>,
+): boolean {
+    const candidates = normalizeSessionCandidates(sessionCandidates);
+    if (candidates.size === 0) {
+        return false;
+    }
+
+    for (const link of task?.executionLinks ?? []) {
+        const linkSessionId = typeof link?.sessionId === 'string' ? link.sessionId.trim() : '';
+        if (!linkSessionId || !candidates.has(linkSessionId)) {
+            continue;
+        }
+        if (link.status !== 'active') {
+            continue;
+        }
+        if (link.role === 'supporting') {
+            continue;
+        }
+        return true;
+    }
+
+    return false;
+}
+
+function isTaskAssignedToSelf(
+    task: TaskExecutionLockSnapshot | null | undefined,
+    sessionCandidates: Iterable<string | null | undefined>,
+): boolean {
+    const candidates = normalizeSessionCandidates(sessionCandidates);
+    const assigneeId = typeof task?.assigneeId === 'string' ? task.assigneeId.trim() : '';
+    return !!assigneeId && candidates.has(assigneeId);
+}
+
+function normalizeRunningSessionIds(members?: any[] | null): Set<string> {
+    const runningSessionIds = new Set<string>();
+    for (const member of members ?? []) {
+        const sessionId = typeof member?.sessionId === 'string' ? member.sessionId.trim() : '';
+        if (!sessionId) continue;
+
+        const lifecycleState = typeof member?.lifecycleState === 'string'
+            ? member.lifecycleState
+            : '';
+        const runStatus = typeof member?.runStatus === 'string'
+            ? member.runStatus
+            : '';
+
+        // roster 中存在但生命周期未知时按 running 处理。
+        // 保留锁比误抢仍在进行的工作更安全。
+        if (!lifecycleState || lifecycleState === 'running' || runStatus === 'active') {
+            runningSessionIds.add(sessionId);
+        }
+    }
+    return runningSessionIds;
+}
+
+export function collectReleasableOverlapExecutionLockSessionIdsForAssignee(args: {
+    targetTask: TaskExecutionLockSnapshot | null | undefined;
+    overlapTask: TaskExecutionLockSnapshot | null | undefined;
+    sessionCandidates: Iterable<string | null | undefined>;
+    runningSessionIds?: Iterable<string | null | undefined>;
+}): string[] {
+    if (!isTaskAssignedToSelf(args.targetTask, args.sessionCandidates)) {
+        return [];
+    }
+
+    const candidates = normalizeSessionCandidates(args.sessionCandidates);
+    const runningSessionIds = normalizeSessionCandidates(args.runningSessionIds ?? []);
+    const overlapStatus = typeof args.overlapTask?.status === 'string'
+        ? args.overlapTask.status
+        : '';
+    const overlapAssignedToSelf = isTaskAssignedToSelf(args.overlapTask, candidates);
+    const overlapIsNotInProgress = !!overlapStatus && overlapStatus !== 'in-progress';
+
+    const releasableSessionIds = new Set<string>();
+    for (const link of args.overlapTask?.executionLinks ?? []) {
+        const linkSessionId = typeof link?.sessionId === 'string' ? link.sessionId.trim() : '';
+        if (!linkSessionId || candidates.has(linkSessionId)) continue;
+        if (link.status !== 'active') continue;
+        if (link.role === 'supporting') continue;
+
+        const lockOwnerIsRunning = runningSessionIds.has(linkSessionId);
+        if (overlapAssignedToSelf || overlapIsNotInProgress || !lockOwnerIsRunning) {
+            releasableSessionIds.add(linkSessionId);
+        }
+    }
+
+    return [...releasableSessionIds];
+}
+
+async function addTaskLockReleaseAuditComment(args: {
+    api: TaskLockReleaseApi;
+    teamId: string;
+    taskId: string;
+    actorSessionId: string;
+    actorRole?: string;
+    actorDisplayName?: string;
+    reason: string;
+    releases: TaskLockReleaseRecord[];
+}): Promise<void> {
+    if (args.releases.length === 0) return;
+
+    const releaseLines = args.releases.map((release) =>
+        `- ${release.sessionId}: unlocked ${release.unlockedTaskIds.join(', ')}`
+    );
+    const content = [
+        '自动审计：`start_task` 前释放 stale execution lock。',
+        `原因：${args.reason}`,
+        '释放记录：',
+        ...releaseLines,
+        '安全边界：仅在当前任务已分配给本 session，或重叠任务锁持有人不在运行 roster / 重叠任务非 in-progress / 重叠任务也分配给本 session 时释放。',
+    ].join('\n');
+
+    try {
+        await args.api.addTaskComment(args.teamId, args.taskId, {
+            sessionId: args.actorSessionId,
+            role: args.actorRole,
+            displayName: args.actorDisplayName,
+            type: 'execution-check',
+            content,
+        });
+    } catch (error) {
+        logger.warn('[TaskTools] Failed to add durable task lock release audit comment', {
+            taskId: args.taskId,
+            error: error instanceof Error ? error.message : String(error),
+        });
+    }
+}
+
+async function releaseForeignActiveExecutionLocksForAssignee(args: {
+    api: TaskLockReleaseApi;
+    teamId: string;
+    taskId: string;
+    sessionCandidates: Iterable<string | null | undefined>;
+    actorSessionId: string;
+    actorRole?: string;
+    actorDisplayName?: string;
+    reason?: string;
+}): Promise<TaskLockReleaseRecord[]> {
+    let task: TaskExecutionLockSnapshot | null = null;
+    try {
+        task = await args.api.getTask(args.teamId, args.taskId);
+    } catch (error) {
+        logger.debug('[TaskTools] Unable to preflight task execution locks before start_task', {
+            taskId: args.taskId,
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return [];
+    }
+
+    const foreignSessionIds = collectForeignActiveExecutionLockSessionIdsForAssignee(
+        task,
+        args.sessionCandidates,
+    );
+    const releases: TaskLockReleaseRecord[] = [];
+    for (const sessionId of foreignSessionIds) {
+        try {
+            const result = await args.api.releaseSessionTaskLocks(args.teamId, sessionId);
+            const unlockedTaskIds = Array.isArray(result.unlockedTaskIds)
+                ? result.unlockedTaskIds.filter((taskId): taskId is string => typeof taskId === 'string')
+                : [];
+            if (!result.success || unlockedTaskIds.length === 0) {
+                logger.warn('[TaskTools] Stale foreign execution lock release returned no unlocks', {
+                    taskId: args.taskId,
+                    sessionId,
+                    success: result.success,
+                    unlockedTaskIds,
+                });
+                continue;
+            }
+            releases.push({ sessionId, unlockedTaskIds });
+        } catch (error) {
+            logger.warn('[TaskTools] Failed to release stale foreign execution lock before start_task', {
+                taskId: args.taskId,
+                sessionId,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+
+    if (releases.length > 0) {
+        logger.info('[TaskTools] Released stale foreign execution locks before start_task', {
+            taskId: args.taskId,
+            releases,
+        });
+        await addTaskLockReleaseAuditComment({
+            api: args.api,
+            teamId: args.teamId,
+            taskId: args.taskId,
+            actorSessionId: args.actorSessionId,
+            actorRole: args.actorRole,
+            actorDisplayName: args.actorDisplayName,
+            reason: args.reason || '任务已重新分配给当前 session，但旧 session 仍持有同任务 active execution lock。',
+            releases,
+        });
+    }
+
+    return releases;
+}
+
+async function releaseReleasableOverlapExecutionLocksForAssignee(args: {
+    api: TaskLockReleaseApi;
+    teamId: string;
+    targetTaskId: string;
+    overlapTaskId: string;
+    sessionCandidates: Iterable<string | null | undefined>;
+    actorSessionId: string;
+    actorRole?: string;
+    actorDisplayName?: string;
+}): Promise<TaskLockReleaseRecord[]> {
+    let targetTask: TaskExecutionLockSnapshot | null = null;
+    let overlapTask: TaskExecutionLockSnapshot | null = null;
+    let runningSessionIds = new Set<string>();
+
+    try {
+        [targetTask, overlapTask] = await Promise.all([
+            args.api.getTask(args.teamId, args.targetTaskId),
+            args.api.getTask(args.teamId, args.overlapTaskId),
+        ]);
+        const teamResult = await args.api.getTeam(args.teamId);
+        runningSessionIds = normalizeRunningSessionIds(teamResult?.team?.members ?? []);
+    } catch (error) {
+        logger.debug('[TaskTools] Unable to preflight overlapping execution locks before start_task retry', {
+            targetTaskId: args.targetTaskId,
+            overlapTaskId: args.overlapTaskId,
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return [];
+    }
+
+    const releasableSessionIds = collectReleasableOverlapExecutionLockSessionIdsForAssignee({
+        targetTask,
+        overlapTask,
+        sessionCandidates: args.sessionCandidates,
+        runningSessionIds,
+    });
+
+    const releases: TaskLockReleaseRecord[] = [];
+    for (const sessionId of releasableSessionIds) {
+        try {
+            const result = await args.api.releaseSessionTaskLocks(args.teamId, sessionId);
+            const unlockedTaskIds = Array.isArray(result.unlockedTaskIds)
+                ? result.unlockedTaskIds.filter((taskId): taskId is string => typeof taskId === 'string')
+                : [];
+            if (!result.success || unlockedTaskIds.length === 0) {
+                logger.warn('[TaskTools] Overlap execution lock release returned no unlocks', {
+                    targetTaskId: args.targetTaskId,
+                    overlapTaskId: args.overlapTaskId,
+                    sessionId,
+                    success: result.success,
+                    unlockedTaskIds,
+                });
+                continue;
+            }
+            releases.push({ sessionId, unlockedTaskIds });
+        } catch (error) {
+            logger.warn('[TaskTools] Failed to release stale overlapping execution lock before start_task retry', {
+                targetTaskId: args.targetTaskId,
+                overlapTaskId: args.overlapTaskId,
+                sessionId,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+
+    if (releases.length > 0) {
+        logger.info('[TaskTools] Released stale overlapping execution locks before start_task retry', {
+            targetTaskId: args.targetTaskId,
+            overlapTaskId: args.overlapTaskId,
+            releases,
+        });
+        await addTaskLockReleaseAuditComment({
+            api: args.api,
+            teamId: args.teamId,
+            taskId: args.targetTaskId,
+            actorSessionId: args.actorSessionId,
+            actorRole: args.actorRole,
+            actorDisplayName: args.actorDisplayName,
+            reason: `目标任务与 ${args.overlapTaskId} 的 stale active work 重叠。释放条件已满足：目标任务分配给当前 session，且重叠锁持有人不在运行 roster / 重叠任务非 in-progress / 重叠任务也分配给当前 session。`,
+            releases,
+        });
+    }
+
+    return releases;
+}
+
 export function summarizeTaskForList(task: ListableTask): Record<string, unknown> {
+    const activeExecutionLocks = Array.isArray(task.executionLinks)
+        ? task.executionLinks.flatMap((link): Array<Record<string, string>> => {
+            if (!link || typeof link !== 'object') return [];
+            const candidate = link as { sessionId?: unknown; role?: unknown; status?: unknown };
+            if (candidate.status !== 'active' || typeof candidate.sessionId !== 'string') return [];
+            return [{
+                sessionId: candidate.sessionId,
+                role: typeof candidate.role === 'string' ? candidate.role : 'unknown',
+                status: 'active',
+            }];
+        })
+        : [];
+
     return {
         id: task.id,
         title: typeof task.title === 'string' ? task.title : task.id,
@@ -274,6 +651,7 @@ export function summarizeTaskForList(task: ListableTask): Record<string, unknown
         blockerCount: Array.isArray(task.blockers) ? task.blockers.length : 0,
         acceptanceCriteriaCount: Array.isArray(task.acceptanceCriteria) ? task.acceptanceCriteria.length : 0,
         subtaskCount: Array.isArray(task.subtaskIds) ? task.subtaskIds.length : 0,
+        ...(activeExecutionLocks.length > 0 ? { activeExecutionLocks } : {}),
     };
 }
 
@@ -510,8 +888,9 @@ export function registerTaskTools(ctx: McpToolContext): void {
                     if (existingTask) {
                         const assignedToSelf = sessionCandidates.has(existingTask.assigneeId ?? '');
                         const claimingSelf = !existingTask.assigneeId && !!args.assigneeId && sessionCandidates.has(args.assigneeId);
+                        const activeExecutionOwner = hasActiveExecutionLinkForSelf(existingTask, sessionCandidates);
 
-                        if (!assignedToSelf && !claimingSelf) {
+                        if (!assignedToSelf && !claimingSelf && !activeExecutionOwner) {
                             return {
                                 content: [{ type: 'text', text: `Error: Workers can only update tasks assigned to them. This task is assigned to ${existingTask.assigneeId ?? '(unassigned)'}, your session is ${preferredSessionId} (role: ${role}). Options: (1) ask a coordinator to reassign, (2) use add_task_comment to leave notes, (3) use send_team_message to request the change.` }],
                                 isError: true
@@ -1092,6 +1471,7 @@ export function registerTaskTools(ctx: McpToolContext): void {
             const metadata = client.getMetadata();
             const teamId = metadata?.teamId || metadata?.roomId;
             const preferredSessionId = resolveTaskActorSessionId(metadata, client.sessionId);
+            const sessionCandidates = new Set<string>([preferredSessionId, client.sessionId]);
             let activeSessionId = preferredSessionId;
 
             let taskManager = getTaskStateManager();
@@ -1109,6 +1489,20 @@ export function registerTaskTools(ctx: McpToolContext): void {
             // - Status change to 'in-progress'
             // - State change broadcasting
             // - Team message notification
+            // ownership handoff 缓解：
+            // coordinator 已把任务改派给当前 session，但旧 session 的
+            // execution link 仍 active 时，server 可能拒绝 start_task。
+            // 仅当任务已分配给当前 runtime 的 self id 时释放 foreign active lock，
+            // 避免 worker 抢走 unassigned 或他人任务。
+            await releaseForeignActiveExecutionLocksForAssignee({
+                api,
+                teamId,
+                taskId: args.taskId,
+                sessionCandidates,
+                actorSessionId: preferredSessionId,
+                actorRole: metadata?.role,
+                actorDisplayName: metadata?.displayName || metadata?.name,
+            });
             let result = await taskManager.startTaskWithComment(args.taskId, taskStartComment);
 
             if (!result.success && shouldRetryTaskSessionWithClient({
@@ -1127,6 +1521,25 @@ export function registerTaskTools(ctx: McpToolContext): void {
                 );
                 taskManager = new TaskStateManager(api, teamId, activeSessionId, metadata?.role, metadata);
                 result = await taskManager.startTaskWithComment(args.taskId, taskStartComment);
+            }
+
+            if (!result.success) {
+                const overlapTaskId = parseOverlappingActiveWorkTaskId(result.error ?? '');
+                if (overlapTaskId) {
+                    const overlapReleases = await releaseReleasableOverlapExecutionLocksForAssignee({
+                        api,
+                        teamId,
+                        targetTaskId: args.taskId,
+                        overlapTaskId,
+                        sessionCandidates,
+                        actorSessionId: activeSessionId,
+                        actorRole: metadata?.role,
+                        actorDisplayName: metadata?.displayName || metadata?.name,
+                    });
+                    if (overlapReleases.length > 0) {
+                        result = await taskManager.startTaskWithComment(args.taskId, taskStartComment);
+                    }
+                }
             }
 
             if (!result.success) {

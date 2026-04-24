@@ -1,6 +1,7 @@
-import { normalizeGenomeHubUrl } from '@/configurationResolver'
+import { normalizeGenomeHubUrl, resolveHubPublishKey } from '@/configurationResolver'
 import { buildGenomeRefPath, parseGenomeRef } from '@/utils/genomeRefs';
 import type { LegionImage } from '@/api/types/genome';
+import { configuration } from '@/configuration';
 import { logger } from '@/ui/logger';
 import { buildMarketplaceConnectionHint } from './marketplaceConnection';
 
@@ -775,7 +776,10 @@ export async function publishTeamCorpsTemplate(options: PublishTeamCorpsTemplate
     error?: string;
 }> {
     const hubUrl = normalizeGenomeHubUrl(options.hubUrl);
-    const publishKey = options.publishKey ?? process.env.HUB_PUBLISH_KEY ?? '';
+    const publishKey = resolveHubPublishKey({
+        explicit: options.publishKey,
+        settingsFile: configuration.settingsFile,
+    });
 
     try {
         const teamResult = await options.api.getTeam(options.teamId);

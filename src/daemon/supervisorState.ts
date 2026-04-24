@@ -11,7 +11,7 @@
 
 import { constants } from 'node:fs';
 import { open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
-import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, readdirSync } from 'fs';
+import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, readdirSync, unlinkSync } from 'fs';
 import { join, dirname } from 'path';
 import { configuration } from '@/configuration';
 import { logger } from '@/ui/logger';
@@ -260,6 +260,28 @@ export function writeSupervisorState(state: SupervisorState): void {
     const tmpPath = `${statePath}.tmp`;
     writeFileSync(tmpPath, JSON.stringify(state, null, 2), 'utf-8');
     renameSync(tmpPath, statePath);
+}
+
+export function deleteSupervisorState(teamId: string): boolean {
+    const statePath = getStatePath(teamId);
+    const tmpPath = `${statePath}.tmp`;
+    const lockPath = `${statePath}.lock`;
+    let deleted = false;
+
+    for (const path of [statePath, tmpPath, lockPath]) {
+        if (!existsSync(path)) continue;
+        try {
+            unlinkSync(path);
+            deleted = true;
+        } catch (error) {
+            logger.warn(
+                `[SUPERVISOR STATE] Failed to delete stale state file ${path}: ` +
+                `${error instanceof Error ? error.message : String(error)}`
+            );
+        }
+    }
+
+    return deleted;
 }
 
 export function markTeamTerminated(teamId: string): void {

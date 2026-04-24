@@ -1,4 +1,4 @@
-import { normalizeGenomeHubUrl, readPublishKeyFromSettings, resolveAhaHomeDir } from '@/configurationResolver'
+import { normalizeGenomeHubUrl, resolveAhaHomeDir, resolveHubPublishKey } from '@/configurationResolver'
 import type { RunEnvelope } from '@/daemon/runEnvelope'
 /**
  * @module supervisorTools
@@ -2099,7 +2099,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
                             role: args.role,
                             feedback,
                             hubUrl: normalizeGenomeHubUrl(),
-                            hubPublishKey: process.env.HUB_PUBLISH_KEY ?? '',
+                            hubPublishKey: resolveHubPublishKey({ settingsFile: configuration.settingsFile }),
                             serverUrl: configuration.serverUrl,
                             authToken: client.getAuthToken(),
                         });
@@ -2192,7 +2192,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
             if (entity) {
                 const { writeEntityVerdict } = await import('../utils/evidenceWriter.js');
                 const { buildSessionTrialLogRefs } = await import('@/utils/sessionTrialSync');
-                const hubPublishKey = process.env.HUB_PUBLISH_KEY || readPublishKeyFromSettings(configuration.settingsFile);
+                const hubPublishKey = resolveHubPublishKey({ settingsFile: configuration.settingsFile });
 
                 const verdictWrite = await writeEntityVerdict({
                     namespace: entity.ns,
@@ -2413,7 +2413,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
                 role: args.role,
                 feedback,
                 hubUrl: normalizeGenomeHubUrl(),
-                hubPublishKey: process.env.HUB_PUBLISH_KEY ?? '',
+                hubPublishKey: resolveHubPublishKey({ settingsFile: configuration.settingsFile }),
                 serverUrl: configuration.serverUrl,
                 authToken: client.getAuthToken(),
             });
@@ -2572,7 +2572,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
         }
 
         const hubUrl = normalizeGenomeHubUrl();
-        const publishKey = process.env.HUB_PUBLISH_KEY || readPublishKeyFromSettings(configuration.settingsFile);
+        const publishKey = resolveHubPublishKey({ settingsFile: configuration.settingsFile });
 
         let currentMirror: Awaited<ReturnType<typeof fetchEntityMirror>>;
         try {
@@ -2765,7 +2765,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
         }
 
         const hubUrl = normalizeGenomeHubUrl();
-        const publishKey = process.env.HUB_PUBLISH_KEY || readPublishKeyFromSettings(configuration.settingsFile);
+        const publishKey = resolveHubPublishKey({ settingsFile: configuration.settingsFile });
         const authToken = client.getAuthToken() ?? '';
         const packageSpecId = `${args.genomeNamespace}/${args.genomeName}`;
 
@@ -3226,7 +3226,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
         }
 
         const hubUrl = normalizeGenomeHubUrl();
-        const publishKey = process.env.HUB_PUBLISH_KEY || readPublishKeyFromSettings(configuration.settingsFile);
+        const publishKey = resolveHubPublishKey({ settingsFile: configuration.settingsFile });
 
         try {
             const [targetGenome, versions] = await Promise.all([
@@ -3817,7 +3817,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
                     const { submitDiffViaMarketplace } = await import('@/claude/utils/genomePromotionSync');
                     const biasTrend = cal.scoreBiasTrend > 0 ? 'overestimates' : 'underestimates';
                     const biasAbs = Math.abs(cal.scoreBiasTrend).toFixed(1);
-                    const publishKey = process.env.HUB_PUBLISH_KEY || readPublishKeyFromSettings(configuration.settingsFile);
+                    const publishKey = resolveHubPublishKey({ settingsFile: configuration.settingsFile });
 
                     const diffResult = await submitDiffViaMarketplace({
                         namespace: '@official',

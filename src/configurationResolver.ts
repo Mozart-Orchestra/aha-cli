@@ -7,6 +7,13 @@ import { z } from 'zod'
 export const DEFAULT_SERVER_URL = 'https://aha-agi.com/api'
 export const DEFAULT_WEBAPP_URL = 'https://aha-agi.com/webappv3'
 export const DEFAULT_GENOME_HUB_URL = 'https://aha-agi.com/genome'
+const HUB_PUBLISH_KEY_PLACEHOLDERS = new Set([
+  'dev-key-change-in-prod',
+  'change-me-in-production',
+  'your-key-here',
+  'your-secret-key-here',
+  '<your-hub-publish-key>',
+])
 
 const persistentCliConfigSchema = z.object({
   serverUrl: z.string().url().optional(),
@@ -167,6 +174,18 @@ export function normalizeGenomeHubUrl(
   return (hubUrl ?? resolveConfiguredGenomeHubUrl(env)).replace(/\/$/, '')
 }
 
+export function isPlaceholderHubPublishKey(value?: string | null): boolean {
+  const normalized = value?.trim().toLowerCase()
+  return normalized ? HUB_PUBLISH_KEY_PLACEHOLDERS.has(normalized) : false
+}
+
+export function sanitizeHubPublishKey(value?: string | null): string {
+  const normalized = value?.trim() ?? ''
+  if (!normalized) return ''
+  if (isPlaceholderHubPublishKey(normalized)) return ''
+  return normalized
+}
+
 /**
  * Read genomeHubPublishKey from the aha settings file (~/.aha/settings.json).
  * Returns empty string if the file is missing or the key is not set.
@@ -176,8 +195,28 @@ export function readPublishKeyFromSettings(settingsFile: string): string {
     if (!existsSync(settingsFile)) return ''
     const raw = readFileSync(settingsFile, 'utf8')
     const parsed = JSON.parse(raw) as Record<string, unknown>
-    return typeof parsed.genomeHubPublishKey === 'string' ? parsed.genomeHubPublishKey : ''
+    return typeof parsed.genomeHubPublishKey === 'string' ? sanitizeHubPublishKey(parsed.genomeHubPublishKey) : ''
   } catch {
     return ''
   }
+}
+
+export function resolveHubPublishKey(
+  options?: {
+    explicit?: string | null
+    env?: NodeJS.ProcessEnv
+    settingsFile?: string
+  }
+): string {
+  const explicit = sanitizeHubPublishKey(options?.explicit)
+  if (explicit) return explicit
+
+  const envKey = sanitizeHubPublishKey((options?.env ?? process.env).HUB_PUBLISH_KEY)
+  if (envKey) return envKey
+
+  if (options?.settingsFile) {
+    return readPublishKeyFromSettings(options.settingsFile)
+  }
+
+  return ''
 }

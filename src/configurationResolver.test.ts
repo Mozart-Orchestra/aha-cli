@@ -3,12 +3,15 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import {
+  isPlaceholderHubPublishKey,
   readPersistentCliConfig,
   readPublishKeyFromSettings,
+  resolveHubPublishKey,
   resolveAhaHomeDir,
   resolveConfiguredGenomeHubUrl,
   resolvePersistentConfigFile,
   resolveServerConfig,
+  sanitizeHubPublishKey,
   injectGenomeHubUrlFromServerUrl,
   writePersistentCliConfig,
 } from '@/configurationResolver'
@@ -174,6 +177,38 @@ describe('configurationResolver', () => {
       const settingsFile = join(tempDir, 'settings.json')
       writeFileSync(settingsFile, JSON.stringify({ onboardingCompleted: false }))
       expect(readPublishKeyFromSettings(settingsFile)).toBe('')
+    })
+
+    it('treats placeholder values as unset', () => {
+      tempDir = mkdtempSync(join(process.cwd(), 'tmp-settings-'))
+      const settingsFile = join(tempDir, 'settings.json')
+      writeFileSync(settingsFile, JSON.stringify({ genomeHubPublishKey: 'dev-key-change-in-prod' }))
+      expect(readPublishKeyFromSettings(settingsFile)).toBe('')
+    })
+  })
+
+  describe('hub publish key helpers', () => {
+    it('recognizes placeholder publish keys', () => {
+      expect(isPlaceholderHubPublishKey('dev-key-change-in-prod')).toBe(true)
+      expect(isPlaceholderHubPublishKey('change-me-in-production')).toBe(true)
+      expect(isPlaceholderHubPublishKey('real-key')).toBe(false)
+    })
+
+    it('sanitizes placeholders to empty strings', () => {
+      expect(sanitizeHubPublishKey(' dev-key-change-in-prod ')).toBe('')
+      expect(sanitizeHubPublishKey('')).toBe('')
+      expect(sanitizeHubPublishKey('real-key')).toBe('real-key')
+    })
+
+    it('falls back from placeholder env values to settings.json', () => {
+      tempDir = mkdtempSync(join(process.cwd(), 'tmp-settings-'))
+      const settingsFile = join(tempDir, 'settings.json')
+      writeFileSync(settingsFile, JSON.stringify({ genomeHubPublishKey: 'real-settings-key' }))
+
+      expect(resolveHubPublishKey({
+        env: { HUB_PUBLISH_KEY: 'dev-key-change-in-prod' } as NodeJS.ProcessEnv,
+        settingsFile,
+      })).toBe('real-settings-key')
     })
   })
 })

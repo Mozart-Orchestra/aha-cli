@@ -1,4 +1,4 @@
-import { normalizeGenomeHubUrl, readPublishKeyFromSettings, resolveAhaHomeDir } from '@/configurationResolver'
+import { normalizeGenomeHubUrl, resolveAhaHomeDir, resolveHubPublishKey } from '@/configurationResolver'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 /**
@@ -142,7 +142,7 @@ export function registerAgentTools(ctx: McpToolContext): void {
         spawnReplacementSession,
     } = ctx;
 
-    const getHubPublishKey = () => process.env.HUB_PUBLISH_KEY || readPublishKeyFromSettings(configuration.settingsFile);
+    const getHubPublishKey = () => resolveHubPublishKey({ settingsFile: configuration.settingsFile });
     const getHubUrl = () => normalizeGenomeHubUrl();
 
     const recordGenomeSpawn = (selection: ResolvedGenomeSelection, actorId: string): void => {

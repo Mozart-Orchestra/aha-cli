@@ -1,4 +1,4 @@
-import { injectGenomeHubUrlFromServerUrl, resolveConfiguredGenomeHubUrl } from '@/configurationResolver'
+import { injectGenomeHubUrlFromServerUrl, isPlaceholderHubPublishKey, resolveConfiguredGenomeHubUrl, resolveHubPublishKey } from '@/configurationResolver'
 /**
  * @module run
  * @description Daemon entry point: lifecycle, signals, lock, auth, heartbeat orchestration.
@@ -101,8 +101,20 @@ async function ensureGenomeHubAccess(): Promise<number> {
   const settings = await readSettings();
 
   // 1. Inject publish key into process env so child processes inherit it
-  const publishKey = process.env.HUB_PUBLISH_KEY || settings.genomeHubPublishKey || '';
-  if (publishKey && !process.env.HUB_PUBLISH_KEY) {
+  const rawEnvPublishKey = process.env.HUB_PUBLISH_KEY ?? '';
+  const publishKey = resolveHubPublishKey({
+    explicit: settings.genomeHubPublishKey,
+    env: process.env,
+    settingsFile: configuration.settingsFile,
+  });
+  if (rawEnvPublishKey && isPlaceholderHubPublishKey(rawEnvPublishKey)) {
+    if (publishKey) {
+      logger.warn('[GENOME HUB] Ignoring placeholder HUB_PUBLISH_KEY from environment and using settings.json instead');
+    } else {
+      throw new Error('[GENOME HUB] Invalid HUB_PUBLISH_KEY placeholder detected (for example dev-key-change-in-prod). Remove it from your env or configure a real genomeHubPublishKey in settings.json.');
+    }
+  }
+  if (publishKey && process.env.HUB_PUBLISH_KEY !== publishKey) {
     process.env.HUB_PUBLISH_KEY = publishKey;
     logger.debug('[GENOME HUB] Loaded HUB_PUBLISH_KEY from settings');
   }

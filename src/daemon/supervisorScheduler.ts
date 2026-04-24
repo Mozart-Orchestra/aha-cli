@@ -27,6 +27,7 @@ import { TrackedSession } from './types';
 import { stopSession } from './sessionManager';
 import { SpawnSessionOptions, SpawnSessionResult } from '@/modules/common/registerCommonHandlers';
 import {
+  deleteSupervisorState,
   getPendingActionRetryDelayMs,
   listSupervisorStates,
   readSupervisorState,
@@ -41,7 +42,7 @@ interface TeamOutstandingWorkSummary {
   teamId: string;
   unfinishedTaskCount: number;
   blockedTaskCount: number;
-  status: 'has_work' | 'no_work' | 'unknown';
+  status: 'has_work' | 'no_work' | 'unknown' | 'not_found';
 }
 
 // ── Context type ───────────────────────────────────────────────────────────────
@@ -157,6 +158,26 @@ export function hasLiveSupervisorForTeam(
   }
 
   return false;
+}
+
+export function findTrackedSupervisorSessionForPid(
+  teamId: string,
+  supervisorPid: number,
+  pidToTrackedSession: Map<number, TrackedSession>,
+): TrackedSession | undefined {
+  const session = pidToTrackedSession.get(supervisorPid);
+  if (!session) return undefined;
+
+  const meta = session.ahaSessionMetadataFromLocalWebhook;
+  const sessionTeamId = meta?.teamId || meta?.roomId || session.spawnOptions?.teamId;
+  const role = meta?.role || session.spawnOptions?.role;
+  const executionPlane = meta?.executionPlane || session.spawnOptions?.executionPlane;
+
+  if (sessionTeamId !== teamId) return undefined;
+  if (role !== 'supervisor') return undefined;
+  if (executionPlane && executionPlane !== 'bypass') return undefined;
+  if (session.intentionallyStopped) return undefined;
+  return session;
 }
 
 /**
@@ -295,6 +316,10 @@ function getServerAuthHeaders(credentialsToken: string): Record<string, string> 
   };
 }
 
+export function isTeamNotFoundError(error: unknown): boolean {
+  return (error as { response?: { status?: number } } | null)?.response?.status === 404;
+}
+
 function shouldScanAllTeamsForSupervisors(): boolean {
   return process.env.AHA_SUPERVISOR_SCAN_ALL_TEAMS === '1';
 }
@@ -339,6 +364,20 @@ async function fetchOutstandingWorkSummary(
       status: unfinishedTasks.length > 0 ? 'has_work' : 'no_work',
     };
   } catch (error) {
+    if (isTeamNotFoundError(error)) {
+      const deleted = deleteSupervisorState(teamId);
+      logger.debug(
+        `[SUPERVISOR SCHEDULER] 已删除缺失团队 ${teamId} 的陈旧 supervisor state ` +
+        `(server returned 404, deleted=${deleted})`
+      );
+      return {
+        teamId,
+        unfinishedTaskCount: 0,
+        blockedTaskCount: 0,
+        status: 'not_found',
+      };
+    }
+
     logger.debug(
       `[SUPERVISOR SCHEDULER] Failed to fetch task summary for team ${teamId}: ` +
       `${error instanceof Error ? error.message : 'unknown error'}`
@@ -476,6 +515,10 @@ export async function runSupervisorCycle(ctx: SupervisorContext): Promise<void> 
     const liveSessionIds = liveMainlineSessionIdsByTeam.get(supervisorState.teamId) ?? new Set<string>();
     const outstandingWork = outstandingWorkByKnownTeam.get(supervisorState.teamId);
     const workStatus = outstandingWork?.status ?? 'unknown';
+    if (workStatus === 'not_found') {
+      logger.debug(`[SUPERVISOR SCHEDULER] 陈旧 state 清理后跳过已删除团队 ${supervisorState.teamId}`);
+      continue;
+    }
     const hasOutstandingWork = workStatus === 'has_work';
 
     // Auto-terminate if no live sessions and idle timeout has elapsed
@@ -685,7 +728,16 @@ export async function runSupervisorCycle(ctx: SupervisorContext): Promise<void> 
         process.kill(supervisorState.lastSupervisorPid, 0); // liveness check
 
         // PID is alive, but check if MCP heartbeat considers the supervisor session dead (zombie).
-        const lastSessionId = supervisorState.lastSessionId;
+        // Prefer the tracked PID→session identity because persisted supervisor state can lag
+        // daemon runtime state. In the split-brain failure mode, lastSupervisorPid is set but
+        // lastSessionId may be null/stale, while pidToTrackedSession still knows the actual
+        // AHA session that MCP heartbeat has declared dead.
+        const trackedSupervisor = findTrackedSupervisorSessionForPid(
+          teamId,
+          supervisorState.lastSupervisorPid,
+          pidToTrackedSession
+        );
+        const lastSessionId = trackedSupervisor?.ahaSessionId || supervisorState.lastSessionId;
         const isZombie = lastSessionId && mcpDeadSessionIds.has(lastSessionId);
         if (isZombie) {
           logger.debug(

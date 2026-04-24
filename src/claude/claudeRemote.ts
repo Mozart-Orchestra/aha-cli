@@ -1,5 +1,5 @@
 import { EnhancedMode, PermissionMode } from "./loop";
-import { query, type QueryOptions as Options, type SDKMessage, type SDKSystemMessage, AbortError, SDKUserMessage } from '@/claude/sdk'
+import { query, type QueryOptions as Options, type SDKMessage, type SDKSystemMessage, type SDKResultMessage, AbortError, SDKUserMessage } from '@/claude/sdk'
 import { claudeCheckSession } from "./utils/claudeCheckSession";
 import { join, resolve } from 'node:path';
 import { projectPath } from "@/projectPath";
@@ -179,7 +179,24 @@ export async function claudeRemote(opts: {
             // Handle result messages
             if (message.type === 'result') {
                 updateThinking(false);
-                logger.debug('[claudeRemote] Result received, exiting claudeRemote');
+                const resultMsg = message as SDKResultMessage;
+
+                if (resultMsg.is_error) {
+                    const resultText = resultMsg.result || '';
+                    const isContextLengthError =
+                        resultText.includes('invalid_request_error') &&
+                        resultText.includes('input length');
+
+                    if (isContextLengthError) {
+                        logger.debug('[claudeRemote] Context length error detected, resetting session');
+                        opts.onSessionReset?.();
+                        throw new Error(`CLAUDE_CONTEXT_LENGTH_EXCEEDED: ${resultText}`);
+                    }
+
+                    logger.debug('[claudeRemote] Result error received: ' + resultText);
+                } else {
+                    logger.debug('[claudeRemote] Result received, exiting claudeRemote');
+                }
 
                 // Send ready event
                 opts.onReady();

@@ -81,6 +81,85 @@ export function buildSkillsAwarenessPrompt(skillNames?: string[] | null): string
     ].join('\n');
 }
 
+export type CodexTeamHistoryMessage = {
+    type?: string | null;
+    fromRole?: string | null;
+    timestamp?: number | string | null;
+    content?: string | null;
+    shortContent?: string | null;
+    metadata?: { priority?: string | null } | null;
+};
+
+function formatHistoryTimestamp(timestamp?: number | string | null): string {
+    if (typeof timestamp === 'number' && Number.isFinite(timestamp)) {
+        return new Date(timestamp).toISOString().slice(11, 19);
+    }
+    if (typeof timestamp === 'string' && timestamp.trim()) {
+        const parsed = Date.parse(timestamp);
+        if (Number.isFinite(parsed)) {
+            return new Date(parsed).toISOString().slice(11, 19);
+        }
+    }
+    return '--:--:--';
+}
+
+export function summarizeCodexTeamHistory(
+    history?: CodexTeamHistoryMessage[] | null,
+    maxMessages = 10,
+): string {
+    if (!history?.length) {
+        return '(No recent history)';
+    }
+
+    const requestedLimit = Number.isFinite(maxMessages) ? Math.trunc(maxMessages) : 10;
+    const limit = Math.max(1, requestedLimit);
+    const tail = history.slice(-limit);
+    const typeCounts = tail.reduce<Record<string, number>>((acc, message) => {
+        const type = message.type || 'chat';
+        acc[type] = (acc[type] || 0) + 1;
+        return acc;
+    }, {});
+
+    const lines = tail.map((message) => {
+        const time = formatHistoryTimestamp(message.timestamp);
+        const role = message.fromRole || 'user';
+        const type = message.type || 'chat';
+        const priority = message.metadata?.priority ? ` [${String(message.metadata.priority).toUpperCase()}]` : '';
+        const preview = (message.shortContent || message.content || '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 160);
+        return `[${time}] ${role} · ${type}${priority}: ${preview}`;
+    });
+
+    const statsText = Object.entries(typeCounts)
+        .map(([type, count]) => `${type}:${count}`)
+        .join(' · ');
+
+    return `${lines.join('\n')}\n\nActive type distribution: ${statsText || 'none'}`;
+}
+
+export function buildCodexTeamContextMessage(args: {
+    rolePrompt?: string | null;
+    teamName?: string | null;
+    historyText?: string | null;
+}): string | undefined {
+    const rolePrompt = args.rolePrompt?.trim();
+    const teamName = args.teamName?.trim() || 'Team';
+    const historyText = args.historyText?.trim() || '(No recent history)';
+    const activityBlock = trimIdent(`
+        ## Team Name
+        ${teamName}
+
+        ## Recent Team Activity
+        ${historyText}
+    `);
+
+    return [rolePrompt, activityBlock]
+        .filter((block): block is string => Boolean(block?.trim()))
+        .join('\n\n') || undefined;
+}
+
 export function composeCodexBaseInstructions(blocks: Array<string | null | undefined>): string | undefined {
     const normalized = blocks
         .map((block) => block?.trim())
