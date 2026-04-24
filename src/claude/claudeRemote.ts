@@ -11,6 +11,31 @@ import { awaitFileExist } from "@/modules/watcher/awaitFileExist";
 import { systemPrompt } from "./utils/systemPrompt";
 import { PermissionResult } from "./sdk/types";
 
+/**
+ * Detect context overflow errors from the Claude API.
+ * Pure error-driven — no predictive thresholds.
+ * Must cover all known error message variants because anonymous/relay models
+ * may surface different wording than first-party Anthropic.
+ */
+function isContextOverflowError(text: string): boolean {
+    const lower = text.toLowerCase();
+    return (
+        // Anthropic first-party: invalid_request_error + input length
+        (lower.includes('invalid_request_error') && lower.includes('input length')) ||
+        // "The model has reached its context window limit"
+        lower.includes('context window limit') ||
+        // Standard API error type
+        lower.includes('context_length_exceeded') ||
+        // "prompt is too long: X tokens > Y tokens"
+        lower.includes('prompt is too long') ||
+        // Generic token limit variants
+        lower.includes('token limit') ||
+        lower.includes('too many tokens') ||
+        // "max_tokens exceeded" from some relay providers
+        (lower.includes('max_tokens') && lower.includes('exceed'))
+    );
+}
+
 export async function claudeRemote(opts: {
 
     // Fixed parameters
@@ -183,12 +208,9 @@ export async function claudeRemote(opts: {
 
                 if (resultMsg.is_error) {
                     const resultText = resultMsg.result || '';
-                    const isContextLengthError =
-                        resultText.includes('invalid_request_error') &&
-                        resultText.includes('input length');
 
-                    if (isContextLengthError) {
-                        logger.debug('[claudeRemote] Context length error detected, resetting session');
+                    if (isContextOverflowError(resultText)) {
+                        logger.debug('[claudeRemote] Context overflow error detected, resetting session: ' + resultText.slice(0, 200));
                         opts.onSessionReset?.();
                         throw new Error(`CLAUDE_CONTEXT_LENGTH_EXCEEDED: ${resultText}`);
                     }
