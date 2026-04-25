@@ -720,6 +720,8 @@ Use the \`send_team_message\` tool to communicate with your team members.
                         sessionId: member.sessionId,
                         roleId: member.roleId || member.role || 'unknown',
                         displayName: member.displayName || null,
+                        machineId: member.machineId || null,
+                        machineName: member.machineName || null,
                         liveness: member.liveness,
                         isCollaborating: member.isCollaborating,
                         runtimeType: member.runtimeType || null,
