@@ -22,7 +22,22 @@ type ContextStatusReport = {
     diagnostics?: string[];
 };
 
-function classifyStatus(usedPercent: number | null): { status: string; recommendation: string } {
+function classifyStatus(usedPercent: number | null, runtimeType?: 'claude' | 'codex'): { status: string; recommendation: string } {
+    // Codex self-manages its context window (auto-truncation, internal compaction).
+    // High usage is normal and does NOT require daemon-level compact/replace intervention.
+    if (runtimeType === 'codex') {
+        if (usedPercent === null) {
+            return {
+                status: '🟢 SELF-MANAGED — Codex manages its own context',
+                recommendation: 'Codex handles context internally — no daemon intervention needed',
+            };
+        }
+        return {
+            status: `🟢 SELF-MANAGED — ${usedPercent}% (Codex auto-compacts)`,
+            recommendation: 'Codex manages its own context window — high usage is normal, no compact/replace needed',
+        };
+    }
+
     if (usedPercent === null) {
         return {
             status: '⚪ UNKNOWN — context limit unavailable',
@@ -187,7 +202,7 @@ function buildCodexContextStatus(filePath: string): ContextStatusReport {
     const usedPercent = contextLimitK
         ? Math.round((roundK(currentContextTokens) / contextLimitK) * 100)
         : null;
-    const { status, recommendation } = classifyStatus(usedPercent);
+    const { status, recommendation } = classifyStatus(usedPercent, 'codex');
 
     return {
         runtimeType: 'codex',

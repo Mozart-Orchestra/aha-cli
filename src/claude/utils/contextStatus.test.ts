@@ -89,7 +89,7 @@ describe('getContextStatusReport', () => {
         expect(report.currentContextK).toBe(15);
         expect(report.contextLimitK).toBe(30);
         expect(report.usedPercent).toBe(50);
-        expect(report.status).toContain('MODERATE');
+        expect(report.status).toContain('SELF-MANAGED');
         expect(report.rateLimits).toBeDefined();
     });
 
