@@ -116,6 +116,26 @@ describe('classifyRootCause', () => {
         expect(result.category.subType).not.toBe('permission_mismatch');
     });
 
+    it('Rule 3: exact boundary — diff of 5 does NOT trigger (visible = expected - 5)', () => {
+        const state: SystemStateForClassification = {
+            visibleToolCount: 15,
+            expectedToolCount: 20,
+        };
+        const result = classifyRootCause(40, lowDimensions, state);
+        // Rule: visibleToolCount < expectedToolCount - 5 → 15 < 15 is false
+        expect(result.category.subType).not.toBe('permission_mismatch');
+    });
+
+    it('Rule 3: just past boundary — diff of 6 triggers', () => {
+        const state: SystemStateForClassification = {
+            visibleToolCount: 14,
+            expectedToolCount: 20,
+        };
+        const result = classifyRootCause(40, lowDimensions, state);
+        // 14 < 15 is true → triggers
+        expect(result.category).toEqual({ type: 'system', subType: 'permission_mismatch' });
+    });
+
     it('Rule 3: skipped when either count is undefined', () => {
         const state: SystemStateForClassification = { visibleToolCount: 10 };
         const result = classifyRootCause(40, lowDimensions, state);
