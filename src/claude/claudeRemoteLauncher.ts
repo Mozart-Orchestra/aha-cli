@@ -244,6 +244,38 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
         await abortFuture?.promise;
     }
 
+    async function retireCleanup(reason: string): Promise<void> {
+        const sessionId = session.client.sessionId;
+        const metadata = session.client.getMetadata();
+        const teamId = metadata?.teamId || metadata?.roomId;
+
+        try {
+            await session.api.batchArchiveSessions([sessionId]);
+        } catch (error) {
+            logger.debug('[remote]: retireCleanup: failed to archive session:', error);
+        }
+
+        try {
+            if (teamId) {
+                await session.api.removeTeamMember(teamId, sessionId);
+            }
+        } catch (error) {
+            logger.debug('[remote]: retireCleanup: failed to remove team member:', error);
+        }
+
+        let terminated = false;
+        try {
+            const resp = await daemonPost('/stop-session', { sessionId });
+            terminated = !resp?.error;
+        } catch {
+            // Daemon may not be running
+        }
+
+        if (!terminated) {
+            setTimeout(() => process.exit(0), 500);
+        }
+    }
+
     async function doAbort() {
         logger.debug('[remote]: doAbort');
         await abort();
@@ -352,6 +384,7 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
                             if (!exitReason) {
                                 exitReason = 'exit';
                             }
+                            await retireCleanup(directive.reason || 'explicit-retire-directive');
                             abort().catch(() => {});
                         })();
                     }, 2000);
@@ -391,6 +424,7 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
                                 if (!exitReason) {
                                     exitReason = 'exit';
                                 }
+                                await retireCleanup(directive.reason || 'standby-auto-exit');
                                 abort().catch(() => {});
                             })();
                         }, standbyAutoExitMs);
