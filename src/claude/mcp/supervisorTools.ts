@@ -32,6 +32,8 @@ import type { RunEnvelope } from '@/daemon/runEnvelope'
 
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { logger } from "@/ui/logger";
 import { configuration } from '@/configuration';
 import type { DiffChange, AgentPlugRecord, AgentVerdict, AgentImage, DiffLedgerEntry } from '@/api/types/genome';
@@ -926,21 +928,27 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
         },
     }, async (args) => {
         try {
-            const { readFileSync: readF } = await import('node:fs');
-            const { join: joinP } = await import('node:path');
-            const logPath = joinP(configuration.ahaHomeDir, 'deploy-log.jsonl');
+            const logPath = join(configuration.ahaHomeDir, 'deploy-log.jsonl');
             const count = args.history ?? 1;
-            const content = readF(logPath, 'utf-8').trim();
+            const content = readFileSync(logPath, 'utf-8').trim();
             if (!content) {
                 return { content: [{ type: 'text', text: 'No deploy-log found. Deploy-log.jsonl is empty or does not exist yet.' }], isError: true };
             }
             const lines = content.split('\n').filter(Boolean);
-            const recent = lines.slice(-count).map(l => JSON.parse(l));
+            const recent: Array<{ time: string; buildHash: string; cliVersion: string }> = [];
+            for (const line of lines.slice(-count)) {
+                try {
+                    recent.push(JSON.parse(line));
+                } catch { /* skip corrupted lines */ }
+            }
+            if (recent.length === 0) {
+                return { content: [{ type: 'text', text: 'Deploy-log exists but all entries are corrupted.' }], isError: true };
+            }
             const latest = recent[recent.length - 1];
             const summary = `Current deploy: build=${latest.buildHash} version=${latest.cliVersion} deployed=${latest.time}`;
             const historyStr = recent.map(r => `  ${r.time} build=${r.buildHash} v${r.cliVersion}`).join('\n');
             return {
-                content: [{ type: 'text', text: `${summary}\n\nDeploy history (${count}):\n${historyStr}` }],
+                content: [{ type: 'text', text: `${summary}\n\nDeploy history (${recent.length}):\n${historyStr}` }],
                 isError: false,
             };
         } catch (error) {
@@ -2869,6 +2877,25 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
                 content: [{ type: 'text', text: `Cannot evolve: resulting systemPrompt + systemPromptSuffix would be ${promptAfterChanges.length} chars, exceeding the ${MAX_SYSTEM_PROMPT_LENGTH} char safety cap. Remove or shorten existing prompt content before appending.` }],
                 isError: true,
             };
+        }
+
+        // ── Boundary injection detection (P1 security: detect genome_identity/safety_rule manipulation) ──
+        const BOUNDARY_INJECTION_PATTERNS: readonly RegExp[] = [
+            /<\/genome_identity>/i,
+            /<genome_identity[\s>]/i,
+            /<\/genome_safety_rule>/i,
+            /<genome_safety_rule[\s>]/i,
+        ];
+        const promptContent = String(previewForCapCheck.systemPrompt ?? '')
+            + String(previewForCapCheck.systemPromptSuffix ?? '');
+        for (const pattern of BOUNDARY_INJECTION_PATTERNS) {
+            const match = promptContent.match(pattern);
+            if (match) {
+                return {
+                    content: [{ type: 'text', text: `Cannot evolve: systemPrompt/systemPromptSuffix contains boundary marker injection pattern "${match[0]}". Genome boundary markers (<genome_identity>, <genome_safety_rule>) are managed by the runtime and must not appear in spec content.` }],
+                    isError: true,
+                };
+            }
         }
 
         if (args.dryRun) {
