@@ -31,6 +31,7 @@ import type { RunEnvelope } from '@/daemon/runEnvelope'
  */
 
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
 import { logger } from "@/ui/logger";
 import { configuration } from '@/configuration';
 import type { DiffChange, AgentPlugRecord, AgentVerdict, AgentImage, DiffLedgerEntry } from '@/api/types/genome';
@@ -2388,6 +2389,38 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
         const sessionInfo = ` sessionScore(task_completion=${sessionScore.taskCompletion}, code_quality=${sessionScore.codeQuality}, collaboration=${sessionScore.collaboration}, overall=${sessionScore.overall})`;
         const autoResolvedNote = !args.specId && resolvedSpecId ? ' (specId auto-resolved from team member)' : '';
         const verdictInfo = verdictId ? ` verdictId=${verdictId}` : '';
+
+        // ── [EVENT:agent.scored] — Notify the scored agent via team chat ──
+        // Active Perception Layer Phase 1: agents need to know when they are scored,
+        // especially low scores, so they can self-reflect and adjust behavior.
+        // This is the entry signal for L2 root cause classification.
+        if (!args.unscoreableCycle) {
+            try {
+                const eventContent = [
+                    `[EVENT:agent.scored] session: ${args.sessionId.slice(0, 8)}...`,
+                    `| role: ${args.role}`,
+                    `| score: ${overall}/100`,
+                    `| action: ${args.action}`,
+                    `| dimensions: ${dimSummary}`,
+                    ...(triggerLevel === 'L2_alert' ? [`| ⚠️ LOW SCORE — consider self-reflection`] : []),
+                    ...(rootCauseSummary ? [`| root-cause: ${rootCauseSummary.replace(/\n/g, ' ').trim()}`] : []),
+                ].join(' ');
+
+                await api.sendTeamMessage(args.teamId, {
+                    id: randomUUID(),
+                    teamId: args.teamId,
+                    content: eventContent,
+                    shortContent: `[EVENT:agent.scored] ${args.role} scored ${overall}/100 action=${args.action}`,
+                    type: 'notification',
+                    timestamp: Date.now(),
+                    fromSessionId: client.sessionId,
+                    fromRole: client.getMetadata()?.role ?? 'supervisor',
+                    fromDisplayName: client.getMetadata()?.displayName ?? 'Supervisor',
+                    mentions: [args.sessionId],
+                });
+            } catch { /* notification must never break scoring */ }
+        }
+
         return {
             content: [{
                 type: 'text',
