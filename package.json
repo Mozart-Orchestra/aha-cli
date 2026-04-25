@@ -1,6 +1,6 @@
 {
   "name": "aha-agi",
-  "version": "1.0.41",
+  "version": "1.0.43",
   "description": "Mobile and Web client for Claude Code and Codex",
   "author": "swmtjy",
   "license": "MIT",
@@ -46,6 +46,8 @@
   },
   "files": [
     "dist",
+    "!dist/**/*.map",
+    "!dist/**/*.d.ts.map",
     "bin",
     "scripts",
     "skills",

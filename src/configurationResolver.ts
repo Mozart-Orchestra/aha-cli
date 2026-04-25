@@ -146,13 +146,13 @@ export function resolveServerConfig(
 
 function readFlagFromArgv(flag: string): string | undefined {
   const argv = process.argv;
-  for (let i = 0; i < argv.length - 1; i++) {
-    if (argv[i] === flag) {
-      return argv[i + 1];
-    }
-    // Handle --flag=value syntax
+  for (let i = 0; i < argv.length; i++) {
+    // Handle --flag=value syntax (works even as last argument)
     if (argv[i].startsWith(`${flag}=`)) {
       return argv[i].substring(flag.length + 1);
+    }
+    if (argv[i] === flag && i + 1 < argv.length) {
+      return argv[i + 1];
     }
   }
   return undefined;
