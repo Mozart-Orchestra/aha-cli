@@ -79,11 +79,14 @@ export interface SupervisorContext {
 // ── Shared helper ──────────────────────────────────────────────────────────────
 
 /**
- * Build a map of teamId → Set<ahaSessionId> for all live mainline sessions.
+ * Build a map of teamId → Set<ahaSessionId> for all live mainline sessions
+ * (excludes supervisor and help-agent roles).
  *
- * Self-referential closure: all roles (including supervisor and help-agent) are
- * included so the system can observe and score itself.  Supervisor(n+1) scoring
- * Supervisor(n) is objective because the instances differ.
+ * Used for: liveness checks, auto-terminate decisions, work-scan triggers.
+ * See wiki/architecture/evolution-chain.md: mainlineLifecycleSessions.
+ *
+ * For the scoring/evaluation pool (which includes supervisor), use
+ * collectEvaluableSessionIdsByTeam() instead.
  */
 export function collectLiveMainlineSessionIdsByTeam(
   pidToTrackedSession: Map<number, TrackedSession>
@@ -94,7 +97,9 @@ export function collectLiveMainlineSessionIdsByTeam(
     const meta = session.ahaSessionMetadataFromLocalWebhook;
     const sessionTeamId = meta?.teamId || meta?.roomId;
     if (!sessionTeamId || !session.ahaSessionId) continue;
-    // Exclude bypass execution plane only — all roles are visible to the system.
+    // Exclude supervisor and help-agent roles (mainline lifecycle set)
+    if (meta?.role === 'supervisor' || meta?.role === 'help-agent') continue;
+    // Exclude bypass execution plane (double-safety with role check)
     if (meta?.executionPlane === 'bypass') continue;
 
     const teamSessions = sessionsByTeam.get(sessionTeamId) ?? new Set<string>();
