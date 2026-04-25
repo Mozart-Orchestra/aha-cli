@@ -32,12 +32,14 @@ describe('getContextStatusReport', () => {
             metadata: {
                 claudeSessionId: 'claude-local-1',
                 flavor: 'claude',
+                resolvedModel: 'claude-sonnet-4-6',
             } as any,
         });
 
         expect(report.runtimeType).toBe('claude');
         expect(report.available).toBe(true);
         expect(report.currentContextK).toBe(130);
+        expect(report.contextLimitK).toBe(200);
         expect(report.usedPercent).toBe(65);
         expect(report.status).toContain('MODERATE');
     });

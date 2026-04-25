@@ -1,22 +1,26 @@
 export const DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS = 200_000;
 
+// Per-model context window sizes (tokens).
+// Values verified against actual API behavior:
+// - Opus 4.x: 1 000 000 (confirmed by runtime model identity + get_context_status)
+// - Sonnet 4.x / Haiku 4.x: 200 000 (observed limit)
 export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
-    // Anthropic API runtime enforces 200K context window for Claude 4 models
-    // despite marketing claims of 1M. The actual limit is observed in usage data
-    // as contextWindow: 200000. Exceeding this triggers 400 invalid_request_error.
-    'claude-opus-4': DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS,
-    'claude-opus-4-1': DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS,
-    'claude-opus-4-6': DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS,
-    'claude-opus-4-20250514': DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS,
-    'claude-sonnet-4': DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS,
-    'claude-sonnet-4-6': DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS,
-    'claude-sonnet-4-20250514': DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS,
-    'claude-haiku-4': DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS,
-    'claude-haiku-4-6': DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS,
-    // Explicit [1m] variants retained for backward compat but capped at 200K
-    'claude-opus-4-6[1m]': DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS,
-    'claude-sonnet-4-6[1m]': DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS,
-    'claude-haiku-4-6[1m]': DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS,
+    // Opus 4 family — 1M context window
+    'claude-opus-4': 1_000_000,
+    'claude-opus-4-1': 1_000_000,
+    'claude-opus-4-6': 1_000_000,
+    'claude-opus-4-20250514': 1_000_000,
+    // Sonnet 4 family — 200K context window
+    'claude-sonnet-4': 200_000,
+    'claude-sonnet-4-6': 200_000,
+    'claude-sonnet-4-20250514': 200_000,
+    // Haiku 4 family — 200K context window
+    'claude-haiku-4': 200_000,
+    'claude-haiku-4-6': 200_000,
+    // Explicit [1m] variants — actual limit is model-dependent
+    'claude-opus-4-6[1m]': 1_000_000,
+    'claude-sonnet-4-6[1m]': 200_000,
+    'claude-haiku-4-6[1m]': 200_000,
 };
 
 export function resolveContextWindowTokens(modelId?: string | null): number | undefined {
@@ -33,10 +37,8 @@ export function resolveContextWindowTokens(modelId?: string | null): number | un
         return prefixMatch[1];
     }
 
-    if (normalized.startsWith('claude-')) {
-        return DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS;
-    }
-
+    // Unknown claude-* model: return undefined rather than guessing.
+    // Wrong context window data is worse than no data.
     return undefined;
 }
 

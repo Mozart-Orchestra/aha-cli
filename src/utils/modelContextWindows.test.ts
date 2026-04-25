@@ -8,15 +8,21 @@ import {
 } from './modelContextWindows';
 
 describe('modelContextWindows', () => {
-    it('resolves known Claude model families to context window tokens', () => {
+    it('resolves known Claude model families to correct context window tokens', () => {
+        // Sonnet/Haiku = 200K
         expect(resolveContextWindowTokens('claude-sonnet-4-6')).toBe(DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS);
-        expect(resolveContextWindowTokens('claude-opus-4-20250514')).toBe(DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS);
         expect(resolveContextWindowTokens('claude-sonnet-4')).toBe(DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS);
+        // Opus = 1M
+        expect(resolveContextWindowTokens('claude-opus-4-20250514')).toBe(1_000_000);
     });
 
-    it('falls back to the default Claude context window for versioned variants', () => {
+    it('falls back to the correct window for versioned variants', () => {
         expect(resolveContextWindowTokens('claude-sonnet-4-6-20250929')).toBe(DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS);
         expect(resolveContextWindowTokens('claude-haiku-4-6-preview')).toBe(DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS);
+    });
+
+    it('returns undefined for unknown claude- models (no guessing)', () => {
+        expect(resolveContextWindowTokens('claude-unknown-model')).toBeUndefined();
     });
 
     it('builds a prompt block that includes current model and context window', () => {

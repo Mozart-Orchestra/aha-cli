@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import type { Metadata } from '@/api/types';
 import { findClaudeLogFile, findCodexTranscriptFile, findMostRecentClaudeLogFile, findMostRecentCodexTranscriptFile } from './runtimeLogReader';
-import { DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS, resolveContextWindowTokens } from '@/utils/modelContextWindows';
+import { resolveContextWindowTokens } from '@/utils/modelContextWindows';
 
 type ContextStatusReport = {
     runtimeType: 'claude' | 'codex';
@@ -100,15 +100,17 @@ function safeReadLines(filePath: string): string[] {
     return fs.readFileSync(filePath, 'utf-8').split('\n').filter(Boolean);
 }
 
-function resolveClaudeContextLimitTokens(metadata?: Metadata | null): number {
+function resolveClaudeContextLimitTokens(metadata?: Metadata | null): number | undefined {
     const persistedLimitTokens = typeof (metadata as any)?.contextWindowTokens === 'number'
         ? (metadata as any).contextWindowTokens
         : undefined;
     const resolvedModelLimitTokens = resolveContextWindowTokens((metadata as any)?.resolvedModel);
 
+    // Priority: resolved model limit > persisted metadata > undefined (no fallback guess)
+    // Wrong context window data causes supervisor governance to issue false alerts,
+    // so returning undefined is safer than falling back to a wrong constant.
     return resolvedModelLimitTokens
-        ?? persistedLimitTokens
-        ?? DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS;
+        ?? persistedLimitTokens;
 }
 
 function buildClaudeContextStatus(filePath: string, contextLimitTokens?: number): ContextStatusReport {
@@ -141,7 +143,7 @@ function buildClaudeContextStatus(filePath: string, contextLimitTokens?: number)
         (lastUsage.input_tokens || 0) +
         (lastUsage.cache_creation_input_tokens || 0) +
         (lastUsage.cache_read_input_tokens || 0);
-    const contextLimitK = roundK(contextLimitTokens ?? DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS);
+    const contextLimitK = contextLimitTokens !== undefined ? roundK(contextLimitTokens) : null;
     const rawPercent = contextLimitK
         ? Math.round((roundK(currentContextTokens) / contextLimitK) * 100)
         : null;

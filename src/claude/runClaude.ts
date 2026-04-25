@@ -55,7 +55,7 @@ import { getInjectedAllowedToolsForAgentImage } from '@/utils/genomePublication'
 import { buildRuntimeBuildMetadata } from '@/utils/runtimeBuild';
 import { t } from '@/i18n';
 import { ensureCurrentSessionRegisteredToTeam, forceRegisterCurrentSessionToTeam } from './team/ensureTeamMembership';
-import { buildModelSelfAwarenessPrompt, resolveContextWindowTokens, DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS } from '@/utils/modelContextWindows';
+import { buildModelSelfAwarenessPrompt, resolveContextWindowTokens } from '@/utils/modelContextWindows';
 import { resolveInitialModelOverrides } from './utils/modelOverrides';
 import { buildMountedAgentPrompt } from '@/utils/buildMountedAgentPrompt';
 import { sanitizeFallbackModel } from './utils/sanitizeFallbackModel';
@@ -1285,7 +1285,7 @@ Treat these overrides as team-level additions on top of your default genome/role
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 You have been assigned to this team with role: ${role}.
 
-💡 CONTEXT WINDOW: Call \`get_context_status\` at the start of any large task to check how much context you have remaining. Your context limit is ${Math.round((resolveContextWindowTokens(currentModel) ?? DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS) / 1000)}K tokens.
+💡 CONTEXT WINDOW: Call \`get_context_status\` at the start of any large task to check how much context you have remaining.${resolveContextWindowTokens(currentModel) ? ` Your context limit is ${Math.round(resolveContextWindowTokens(currentModel)! / 1000)}K tokens.` : ''}
 
 ${teamBootContextSection}
 ${teamOverlaySection}
