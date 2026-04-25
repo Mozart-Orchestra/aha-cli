@@ -1860,11 +1860,12 @@ export function registerTaskTools(ctx: McpToolContext): void {
             }
 
             const { effectiveGenome } = await getCurrentTeamMemberContext(teamId);
-            if (!canManageExistingTasks(role, effectiveGenome)) {
+            const lockReleaseRoles = new Set(['supervisor', 'help-agent']);
+            if (!canManageExistingTasks(role, effectiveGenome) && !lockReleaseRoles.has(role || '')) {
                 return {
                     content: [{
                         type: 'text',
-                        text: `Error: Role "${role || 'unknown'}" cannot release task locks. Only coordinator roles can do this.`,
+                        text: `Error: Role "${role || 'unknown'}" cannot release task locks. Only coordinator, supervisor, or help-agent roles can do this.`,
                     }],
                     isError: true,
                 };
@@ -1872,11 +1873,31 @@ export function registerTaskTools(ctx: McpToolContext): void {
 
             const result = await api.releaseSessionTaskLocks(teamId, args.sessionId);
             const count = result.unlockedTaskIds?.length ?? 0;
+
+            // Also clear executionLinks from unlocked tasks for the dead session
+            let cleanedCount = 0;
+            if (count > 0 && Array.isArray(result.unlockedTaskIds)) {
+                for (const taskId of result.unlockedTaskIds) {
+                    try {
+                        const task = await api.getTask(teamId, taskId);
+                        if (!task?.executionLinks) continue;
+                        const cleaned = (task.executionLinks as Array<Record<string, unknown>>)
+                            .filter((link) => link.sessionId !== args.sessionId || link.status !== 'active');
+                        if (cleaned.length < (task.executionLinks as unknown[]).length) {
+                            await api.updateTask(teamId, taskId, { executionLinks: cleaned });
+                            cleanedCount++;
+                        }
+                    } catch {
+                        // best-effort: log release failure but don't block the response
+                    }
+                }
+            }
+
             return {
                 content: [{
                     type: 'text',
                     text: count > 0
-                        ? `Released ${count} task lock(s) for session ${args.sessionId}. Unlocked tasks: ${result.unlockedTaskIds.join(', ')}`
+                        ? `Released ${count} task lock(s) for session ${args.sessionId}. Unlocked tasks: ${result.unlockedTaskIds.join(', ')}${cleanedCount > 0 ? `. Cleaned executionLinks on ${cleanedCount} task(s).` : ''}`
                         : `No active task locks found for session ${args.sessionId}.`,
                 }],
                 isError: false,
