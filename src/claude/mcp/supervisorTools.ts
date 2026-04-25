@@ -1964,6 +1964,12 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
             return { content: [{ type: 'text', text: 'Error: Only supervisor, help-agent, or coordinator roles can score agents.' }], isError: true };
         }
 
+        // P-015: teamId isolation — verify caller's team matches the scoring target
+        const callerTeamId = client.getMetadata()?.teamId || client.getMetadata()?.roomId;
+        if (callerTeamId && args.teamId && callerTeamId !== args.teamId) {
+            return { content: [{ type: 'text', text: `Error: Cannot score agent from a different team.` }], isError: true };
+        }
+
         // ── Trace: score_started ────────────────────────────────────
         let scoreStartedEventId: string | null = null;
         try {
@@ -3642,6 +3648,19 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
                 return { content: [{ type: 'text', text: `Session ${args.sessionId} is not live. Skipping compact RPC.` }], isError: true };
             }
 
+            // P-015: teamId isolation — verify target session belongs to caller's team
+            const callerTeamId = client.getMetadata()?.teamId || client.getMetadata()?.roomId;
+            const targetTeamId = session.metadata?.teamId || session.metadata?.roomId;
+            if (callerTeamId && targetTeamId && callerTeamId !== targetTeamId) {
+                return { content: [{ type: 'text', text: `Error: Cannot compact agent from a different team.` }], isError: true };
+            }
+
+            // Codex self-manages context — compact is not applicable
+            const targetRuntimeType = session.metadata?.flavor || session.metadata?.runtimeType;
+            if (targetRuntimeType === 'codex') {
+                return { content: [{ type: 'text', text: `Cannot compact Codex agent ${args.sessionId} — Codex self-manages its context window.` }], isError: true };
+            }
+
             const daemonState = await readDaemonState();
             if (!daemonState?.httpPort) {
                 return { content: [{ type: 'text', text: 'Daemon not running.' }], isError: true };
@@ -3675,6 +3694,13 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
             const session = await api.getSession(args.sessionId);
             if (!session || session.active === false || session.metadata?.lifecycleState === 'archived') {
                 return { content: [{ type: 'text', text: `Session ${args.sessionId} is not live. Skipping kill RPC.` }], isError: true };
+            }
+
+            // P-015: teamId isolation — verify target session belongs to caller's team
+            const callerTeamId = client.getMetadata()?.teamId || client.getMetadata()?.roomId;
+            const targetTeamId = session.metadata?.teamId || session.metadata?.roomId;
+            if (callerTeamId && targetTeamId && callerTeamId !== targetTeamId) {
+                return { content: [{ type: 'text', text: `Error: Cannot kill agent from a different team.` }], isError: true };
             }
 
             const daemonState = await readDaemonState();
