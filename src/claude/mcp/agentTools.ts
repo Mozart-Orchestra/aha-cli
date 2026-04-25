@@ -26,6 +26,7 @@ import { join } from 'node:path'
  */
 
 import { z } from "zod";
+import { sessionIdSchema } from '@/claude/mcp/validation';
 import { randomUUID } from "node:crypto";
 import { logger } from "@/ui/logger";
 import { configuration } from '@/configuration';
@@ -823,7 +824,7 @@ The \`prompt\` field is injected as the agent's initial task context. Write it a
         description: 'Override the model for a running agent session. Supervisor/master can use this to switch any agent\'s model. Takes effect the next time the agent session is started/restarted.',
         title: 'Update Agent Model',
         inputSchema: {
-            sessionId: z.string().describe('Session ID of the agent to update'),
+            sessionId: sessionIdSchema.describe('Session ID of the agent to update'),
             modelId: z.string().describe('New model to use (e.g. claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-6)'),
             fallbackModelId: z.string().optional().describe('Fallback model if primary is unavailable'),
             runtimeType: z.enum(['claude', 'codex']).optional().describe('Optional runtime switch. When set, use replace_agent semantics to hot-swap the session onto the requested runtime.'),
@@ -883,7 +884,7 @@ The \`prompt\` field is injected as the agent's initial task context. Write it a
         description: 'Temporarily grant one additional non-destructive tool to another session. Supervisor/master only. Requires target genome opt-in via @granted token and enforces TTL + audit fields.',
         title: 'Grant Tool Access',
         inputSchema: {
-            sessionId: z.string().describe('Target session ID receiving the temporary grant'),
+            sessionId: sessionIdSchema.describe('Target session ID receiving the temporary grant'),
             tool: z.string().describe('Logical tool name to grant, e.g. get_genome_spec'),
             ttl_minutes: z.number().int().min(1).max(DEFAULT_DYNAMIC_TOOL_GRANT_TTL_MINUTES).default(DEFAULT_DYNAMIC_TOOL_GRANT_TTL_MINUTES).describe('Grant TTL in minutes (max 30)'),
             reason: z.string().min(1).describe('Why this temporary grant is needed'),
@@ -1141,7 +1142,7 @@ The \`prompt\` field is injected as the agent's initial task context. Write it a
         description: 'Hot-swap an agent session after a vote or coordinator decision. Spawns a replacement agent, optionally switches runtime between Claude and Codex, reassigns unfinished tasks, and archives the old session.',
         title: 'Replace Agent',
         inputSchema: {
-            sessionId: z.string().describe('Target session ID to replace'),
+            sessionId: sessionIdSchema.describe('Target session ID to replace'),
             teamId: z.string().optional().describe('Team ID. Defaults to your current team or the target session team'),
             runtimeType: z.enum(['claude', 'codex']).optional().describe('Replacement runtime. Defaults to the current runtime.'),
             sessionName: z.string().optional().describe('Optional replacement display name'),

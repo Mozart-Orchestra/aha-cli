@@ -22,6 +22,7 @@
  */
 
 import { z } from "zod";
+import { sessionIdSchema } from '@/claude/mcp/validation';
 import { randomUUID } from "node:crypto";
 import { logger } from "@/ui/logger";
 import {
@@ -1842,7 +1843,7 @@ export function registerTaskTools(ctx: McpToolContext): void {
         description: 'Release all active task execution locks for a dead or stuck session. Coordinator roles can release locks so other agents can claim the tasks. Use this when start_task fails because a dead session still holds the lock.',
         title: 'Release Task Locks',
         inputSchema: {
-            sessionId: z.string().describe('Session ID whose task locks should be released'),
+            sessionId: sessionIdSchema.describe('Session ID whose task locks should be released'),
         },
     }, async (args) => {
         try {

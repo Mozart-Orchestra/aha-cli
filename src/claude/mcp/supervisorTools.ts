@@ -43,6 +43,7 @@ import { resolveFeedbackUploadTarget, scoreMatchesFeedbackTarget, deriveFeedback
 import { syncGenomeFeedbackToMarketplace } from '../utils/genomeFeedbackSync';
 import { buildSessionScopeFilters, matchesSessionScopeFilter } from '@/claude/team/sessionScope';
 import { stripSessionScopedAhaEnv } from '@/utils/sessionScopedAhaEnv';
+import { sessionIdSchema, optionalSessionIdSchema } from '@/claude/mcp/validation';
 
 function canUseSupervisorObservationTools(role?: string): boolean {
     return typeof role === 'string'
@@ -788,7 +789,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
         ].join(' '),
         title: 'Get Context Status',
         inputSchema: {
-            sessionId: z.string().optional().describe('Session ID to check. Omit to check yourself (uses list_team_cc_logs to find your log).'),
+            sessionId: optionalSessionIdSchema.describe('Session ID to check. Omit to check yourself (uses list_team_cc_logs to find your log).'),
         },
     }, async (args) => {
         // pingDaemonHeartbeat() now called automatically via registerTool wrapper in index.ts
@@ -1551,7 +1552,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
         description: 'List tools currently visible to the session. Uses session metadata captured from the runtime; omitting sessionId inspects yourself.',
         title: 'List Visible Tools',
         inputSchema: {
-            sessionId: z.string().optional().describe('Optional session ID to inspect. Omit to inspect the calling session.'),
+            sessionId: optionalSessionIdSchema.describe('Optional session ID to inspect. Omit to inspect the calling session.'),
             cursor: z.coerce.number().int().min(0).optional().describe('Offset for pagination. Defaults to 0.'),
             limit: z.coerce.number().int().min(1).max(200).optional().describe('Maximum tools to return. Defaults to 50.'),
             includeAll: z.boolean().optional().describe('When false, prefer Aha MCP tools only. Defaults to true.'),
@@ -1590,7 +1591,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
         title: 'Explain Tool Access',
         inputSchema: {
             tool: z.string().describe('Tool name to inspect. Accepts either the logical name or raw MCP name.'),
-            sessionId: z.string().optional().describe('Optional session ID to inspect. Omit to inspect the calling session.'),
+            sessionId: optionalSessionIdSchema.describe('Optional session ID to inspect. Omit to inspect the calling session.'),
         },
     }, async (args) => {
         const inspection = canInspectOtherSession(args.sessionId);
@@ -1622,7 +1623,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
         description: 'Inspect computed permissions for a session. Returns granted and denied capabilities, tools, and denial reasons. Omitting sessionId inspects yourself.',
         title: 'Get Effective Permissions',
         inputSchema: {
-            sessionId: z.string().optional().describe('Optional session ID to inspect. Omit to inspect the calling session.'),
+            sessionId: optionalSessionIdSchema.describe('Optional session ID to inspect. Omit to inspect the calling session.'),
         },
     }, async (args) => {
         const inspection = canInspectOtherSession(args.sessionId);
@@ -1743,7 +1744,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
         description: 'Read Claude Code session log (the iron proof). Accepts either a claudeLocalSessionId or an Aha sessionId; when an Aha sessionId is passed, the tool will try to auto-resolve it through daemon team-session metadata. Shows actual tool calls since last supervisor run (cursor-based). Supervisor/help-agent only.',
         title: 'Read CC Log',
         inputSchema: {
-            sessionId: z.string().describe('Claude local session ID or Aha session ID to read CC log for. Prefer the claudeLocalSessionId from list_team_runtime_logs/list_team_cc_logs.'),
+            sessionId: sessionIdSchema.describe('Claude local session ID or Aha session ID to read CC log for. Prefer the claudeLocalSessionId from list_team_runtime_logs/list_team_cc_logs.'),
             limit: z.coerce.number().default(100).describe('Max log entries to return'),
             fromByteOffset: z.coerce.number().default(-1).describe('Byte offset to read from. -1 = use env AHA_SUPERVISOR_CC_LOG_CURSORS for this claudeLocalSessionId. 0 = read all.'),
         },
@@ -1872,7 +1873,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
         ].join(' '),
         title: 'Score Agent',
         inputSchema: {
-            sessionId: z.string(),
+            sessionId: sessionIdSchema,
             teamId: z.string(),
             role: z.string(),
             specId: z.string().optional().describe('Genome ID of the agent being scored. Get from list_team_agents.'),
@@ -3628,7 +3629,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
         description: 'Administrative compaction command for explicit operator/coordinator-directed recovery. Do not use it as a manual response to context percentage; automatic context handling is runtime-owned. Supervisor/help-agent only.',
         title: 'Compact Agent',
         inputSchema: {
-            sessionId: z.string().describe('Session ID of agent to compact'),
+            sessionId: sessionIdSchema.describe('Session ID of agent to compact'),
         },
     }, async (args) => {
         const role = client.getMetadata()?.role;
@@ -3662,7 +3663,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
         description: 'Terminate a running agent. Use as last resort when an agent is unresponsive or causing problems. Supervisor/help-agent only.',
         title: 'Kill Agent',
         inputSchema: {
-            sessionId: z.string().regex(/^[a-zA-Z0-9_-]+$/).describe('Session ID of agent to kill'),
+            sessionId: sessionIdSchema.describe('Session ID of agent to kill'),
             reason: z.string().describe('Why this agent needs to be killed'),
         },
     }, async (args) => {
@@ -3739,7 +3740,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
         description: 'Archive an agent session, removing it from the active team roster. Supervisor/org-manager only. Use when an agent has completed its work or needs to be retired. Use recover_session to restore.',
         title: 'Archive Session',
         inputSchema: {
-            sessionId: z.string().describe('Session ID to archive'),
+            sessionId: sessionIdSchema.describe('Session ID to archive'),
             reason: z.string().describe('Why this session is being archived'),
         },
     }, async (args) => {
@@ -3885,7 +3886,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
         description: 'Restore a previously archived agent session, making it active again in the team roster. Supervisor/org-manager only. Use when an archived agent needs to resume work.',
         title: 'Recover Session',
         inputSchema: {
-            sessionId: z.string().describe('Session ID to restore from archive'),
+            sessionId: sessionIdSchema.describe('Session ID to restore from archive'),
             reason: z.string().describe('Why this session is being restored'),
         },
     }, async (args) => {
@@ -3960,7 +3961,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
         title: 'Read Runtime Log',
         inputSchema: {
             runtimeType: z.enum(['claude', 'codex', 'open-code']).describe('Runtime to read logs for'),
-            sessionId: z.string().optional().describe('Claude: claudeLocalSessionId from list_team_runtime_logs. Codex session logs: transcript session id / aha session id. Required for session logs.'),
+            sessionId: optionalSessionIdSchema.describe('Claude: claudeLocalSessionId from list_team_runtime_logs. Codex session logs: transcript session id / aha session id. Required for session logs.'),
             logKind: z.enum(['session', 'history']).default('session').describe('Log kind. Use "history" for ~/.codex/history.jsonl.'),
             limit: z.coerce.number().default(100).describe('Max log entries to return'),
             fromCursor: z.coerce.number().default(-1).describe('Cursor to read from. Byte offset for session logs, line cursor for codex history. -1 = use supervisor env cursor.'),
@@ -4065,7 +4066,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
                 severity: z.enum(['low', 'medium', 'high']).describe('Impact severity'),
             })).optional().describe('Structured findings from this cycle (agent-specific observations, persisted for next cycle)'),
             recommendations: z.array(z.string()).optional().describe('Actionable recommendations from this cycle (persisted for next cycle)'),
-            sessionId: z.string().optional().describe('This supervisor session ID (for potential --resume on next run)'),
+            sessionId: optionalSessionIdSchema.describe('This supervisor session ID (for potential --resume on next run)'),
             teamTerminated: z.boolean().default(false).describe('Set true if the team appears fully done and no further supervision is needed'),
             pendingAction: z.union([
                 z.object({
