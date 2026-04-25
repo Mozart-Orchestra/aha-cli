@@ -375,6 +375,8 @@ function buildAgentImageRefInjection(agentImage: AgentImage, specId?: string): N
     const versionLabel = agentImage.version !== undefined ? `v${agentImage.version}` : 'unversioned';
     const hubUrl = normalizeGenomeHubUrl();
     const namespace = agentImage.namespace ?? 'unknown';
+    // legion_context: facts only, no commands. Read at runtime via get_self_view for live data.
+    const legionId = process.env.AHA_TEAM_ID ?? process.env.AHA_ROOM_ID ?? 'unknown';
 
     return {
         trigger: 'on_join',
@@ -385,6 +387,8 @@ function buildAgentImageRefInjection(agentImage: AgentImage, specId?: string): N
             `specOrigin: genome-hub`,
             `hubUrl: ${hubUrl}`,
             `namespace: ${namespace}`,
+            `legionId: ${legionId}`,
+            `legionImageId: unknown`,
         ].join('\n'),
     };
 }

@@ -222,7 +222,7 @@ describe('buildAgentWorkspacePlan', () => {
 
         const genomeSpecJson = JSON.parse(readFileSync(plan.genomeSpecPath, 'utf-8'));
         expect(genomeSpecJson.namespace).toBe('@test');
-        expect(genomeSpecJson.contextInjections.some((entry: any) => entry.content.includes('__genome_ref__'))).toBe(true);
+        expect(genomeSpecJson.contextInjections.some((entry: any) => entry.content.includes('__self_view__'))).toBe(true);
         expect(genomeSpecJson.contextInjections.some((entry: any) => entry.content.includes('@test/genome-reviewer:2'))).toBe(true);
 
         const lineageJson = JSON.parse(readFileSync(plan.genomeLineagePath, 'utf-8'));

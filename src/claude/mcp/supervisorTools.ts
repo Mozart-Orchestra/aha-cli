@@ -1175,9 +1175,42 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
                     warnings: [...runtimeSnapshot.warnings],
                 };
 
+                // ── LEGION CONTEXT (facts only) ──────────────────────────────
+                // Per QA redline 7: no commands, no recommendations, no per-peer scores.
+                let overviewPulse: Array<Record<string, unknown>> = [];
+                if (teamId) {
+                    try {
+                        const daemonState = await readDaemonState();
+                        if (daemonState?.httpPort) {
+                            const resp = await fetch(`http://127.0.0.1:${daemonState.httpPort}/team-pulse`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ teamId }),
+                                signal: AbortSignal.timeout(3_000),
+                            });
+                            const data = await resp.json() as { members: Array<Record<string, unknown>>; summary: string };
+                            overviewPulse = data.members;
+                        }
+                    } catch { /* non-fatal for overview */ }
+                }
+                const legionPeers = overviewPulse
+                    .filter(m => m.sessionId !== sessionId)
+                    .map(m => ({
+                        sessionId: m.sessionId as string,
+                        role: m.role as string,
+                        runtimeType: (m.runtimeType as string) ?? null,
+                    }));
+                const legionContext = teamId ? {
+                    legionId: teamId,
+                    legionImageId: null as string | null,
+                    peers: legionPeers,
+                    legionSize: overviewPulse.length,
+                    legionAvgScore: null as number | null,
+                } : null;
+
                 if (args.format === 'json') {
                     return {
-                        content: [{ type: 'text', text: JSON.stringify(overview, null, 2) }],
+                        content: [{ type: 'text', text: JSON.stringify({ ...overview, legionContext }, null, 2) }],
                         isError: false,
                     };
                 }
@@ -1202,6 +1235,18 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
                     `  Denied: ${overview.tools.summary.deniedCount ?? 'unknown'}`,
                     `  Hidden: ${overview.tools.summary.hiddenCount ?? 'unknown'}`,
                 ];
+
+                if (legionContext) {
+                    lines.push('', '[Legion Context]');
+                    lines.push(`  Legion ID: ${legionContext.legionId}`);
+                    lines.push(`  Size: ${legionContext.legionSize} members`);
+                    if (legionPeers.length > 0) {
+                        lines.push(`  Peers:`);
+                        for (const peer of legionPeers) {
+                            lines.push(`    - ${peer.role} [${peer.runtimeType ?? '?'}]`);
+                        }
+                    }
+                }
                 if (overview.warnings.length > 0) {
                     lines.push('', '[Warnings]');
                     for (const warning of overview.warnings) {
@@ -1491,6 +1536,30 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
                 const icon = member.status === 'alive' ? '🟢' : member.status === 'suspect' ? '🟡' : '🔴';
                 const staleSec = Math.round((member.lastSeenMs as number || 0) / 1000);
                 lines.push(`  ${icon} ${member.role}${isMe}: ${member.status} (${staleSec}s ago) [${member.runtimeType || '?'}]`);
+            }
+
+            // Legion Context (facts only — no recommendations or commands)
+            if (teamId) {
+                const fullPeers = teamPulse
+                    .filter((m: any) => m.sessionId !== sessionId)
+                    .map((m: any) => ({
+                        sessionId: m.sessionId as string,
+                        role: m.role as string,
+                        runtimeType: (m.runtimeType as string) ?? null,
+                    }));
+                lines.push('', '[Legion Context]');
+                lines.push(`  Legion ID: ${teamId}`);
+                lines.push(`  Legion Image ID: unknown`);
+                lines.push(`  Size: ${teamPulse.length}`);
+                lines.push(`  Avg Score: unknown`);
+                if (fullPeers.length > 0) {
+                    lines.push(`  Peers:`);
+                    for (const peer of fullPeers) {
+                        lines.push(`    - ${peer.role} (${peer.sessionId}) [${peer.runtimeType ?? '?'}]`);
+                    }
+                } else {
+                    lines.push(`  Peers: (none)`);
+                }
             }
 
             // My Tasks
