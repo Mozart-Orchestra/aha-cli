@@ -36,7 +36,8 @@ function normalizeRole(role: string | null | undefined): string {
 }
 
 export function getCanonicalGenomeTargetForRole(role: string): { namespace: string; name: string } | null {
-    return ROLE_TO_CANONICAL_GENOME.get(normalizeRole(role)) ?? null;
+    const normalized = normalizeRole(role);
+    return ROLE_TO_CANONICAL_GENOME.get(normalized) ?? { namespace: '@official', name: normalized };
 }
 
 /**

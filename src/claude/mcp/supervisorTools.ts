@@ -2183,7 +2183,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
         let autoFeedbackNote = '';
         if (feedbackTarget && !args.unscoreableCycle) {
             try {
-                const minAutoFeedbackScores = Number(process.env.AHA_MIN_AUTO_FEEDBACK_SCORES ?? '') || 3;
+                const minAutoFeedbackScores = Number(process.env.AHA_MIN_AUTO_FEEDBACK_SCORES ?? '') || 1;
                 const { readScores } = await import('@/claude/utils/scoreStorage');
                 const { scores: allScores } = readScores();
                 const genomeScores = allScores.filter((score) =>
