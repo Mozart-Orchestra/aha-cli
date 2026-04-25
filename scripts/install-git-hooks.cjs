@@ -29,6 +29,22 @@ set -eu
 ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$ROOT_DIR"
 
+# ── SO-PDCA-001: Credential scan on staged diff ─────────────────────────────────
+CREDENTIAL_SCAN="scripts/credential-scan.sh"
+if [ -f "$CREDENTIAL_SCAN" ]; then
+  STAGED_DIFF="$(git diff --cached --diff-filter=ACMR 2>/dev/null || true)"
+  if [ -n "$STAGED_DIFF" ]; then
+    MATCHES="$(echo "$STAGED_DIFF" | bash "$CREDENTIAL_SCAN" 2>/dev/null || true)"
+    if [ -n "$MATCHES" ]; then
+      echo "BLOCKED: Plaintext credential detected in staged files." >&2
+      echo "$MATCHES" | while IFS=: read -r _ name _; do echo "  - $name" >&2; done
+      echo "" >&2
+      echo "Action: Store credentials in .env or settings.json, never commit plaintext." >&2
+      exit 1
+    fi
+  fi
+fi
+
 # Serialize concurrent tsc runs to avoid multi-agent prerecommit OOM on shared machines.
 LOCK_DIR="/tmp/aha-tsc-lock"
 LOCK_TIMEOUT=180
