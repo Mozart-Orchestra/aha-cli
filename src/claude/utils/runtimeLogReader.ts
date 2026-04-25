@@ -274,7 +274,8 @@ export function readRuntimeLog(options: {
 
     if (runtimeType === 'codex' && logKind === 'session') {
         if (!sessionId) throw new Error('sessionId is required to read Codex session logs');
-        const filePath = findCodexTranscriptFile(homeDir, sessionId);
+        const filePath = findCodexTranscriptFile(homeDir, sessionId)
+            ?? findMostRecentCodexTranscriptFile(homeDir);
         if (!filePath) throw new Error(`No Codex transcript found for session ${sessionId}`);
         const resolvedCursor = resolveMappedCursor(fromCursor, codexSessionCursorsEnv, sessionId);
         return {
@@ -298,7 +299,8 @@ export function resolveTeamRuntimeLogs(
         const runtimeType = ((session.runtimeType || (session.claudeLocalSessionId ? 'claude' : 'codex')) as RuntimeType);
         const logFilePath = runtimeType === 'claude'
             ? (session.claudeLocalSessionId ? findClaudeLogFile(homeDir, session.claudeLocalSessionId) : null)
-            : findCodexTranscriptFile(homeDir, session.ahaSessionId);
+            : (findCodexTranscriptFile(homeDir, session.ahaSessionId)
+                || findMostRecentCodexTranscriptFile(homeDir));
         const readSessionId = runtimeType === 'claude'
             ? (session.claudeLocalSessionId ?? null)
             : session.ahaSessionId;

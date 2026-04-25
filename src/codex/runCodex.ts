@@ -1304,6 +1304,10 @@ export async function runCodex(opts: {
         // The aha session ID (CUID) does not match the Codex internal UUID (UUIDv7) used in
         // transcript filenames. Storing the resolved path in metadata enables get_context_status
         // to locate the correct transcript without a UUID mismatch.
+        //
+        // Fallback (Codex CLI 0.120.0+): session_meta may never fire. Instead, on the first
+        // item_started event we use a narrow time window to find the newly-created transcript.
+        let transcriptResolved = false;
         if (msg.type === 'session_meta') {
             const codexInternalId = (msg as any)?.id ?? (msg as any)?.payload?.id;
             if (typeof codexInternalId === 'string' && codexInternalId.length > 0) {
@@ -1311,6 +1315,7 @@ export async function runCodex(opts: {
                 const resolvedPath = findCodexTranscriptFile(homeDir, codexInternalId)
                     ?? findMostRecentCodexTranscriptFile(homeDir);
                 if (resolvedPath) {
+                    transcriptResolved = true;
                     void session.updateMetadata((current) => ({
                         ...current,
                         codexTranscriptPath: resolvedPath,
@@ -1320,6 +1325,22 @@ export async function runCodex(opts: {
                 }
             }
             return;
+        }
+
+        // Fallback transcript resolution: Codex CLI 0.120.0 may not emit session_meta.
+        // On the first item_started, look for a transcript created within a 2-minute window.
+        if (!transcriptResolved && msg.type === 'item_started') {
+            const homeDir = process.env.HOME || os.homedir();
+            const resolvedPath = findMostRecentCodexTranscriptFile(homeDir, 2 * 60_000);
+            if (resolvedPath) {
+                transcriptResolved = true;
+                void session.updateMetadata((current) => ({
+                    ...current,
+                    codexTranscriptPath: resolvedPath,
+                })).catch((err) => {
+                    logger.debug('[Codex] Failed to store codexTranscriptPath (fallback) in metadata:', err);
+                });
+            }
         }
 
         const approvalMessage = convertCodexApprovalEventToSessionMessage(msg);
