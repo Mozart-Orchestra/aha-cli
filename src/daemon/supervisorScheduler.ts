@@ -112,10 +112,11 @@ export function collectLiveMainlineSessionIdsByTeam(
 
 /**
  * Build a map of teamId → Set<ahaSessionId> for all evaluable sessions,
- * INCLUDING supervisor and help-agent roles (but excluding bypass plane).
+ * INCLUDING supervisor, help-agent, and bypass-plane sessions.
  *
- * Self-referential closure: the scoring/evaluation pool must include all roles,
+ * Self-referential closure: the scoring/evaluation pool must include ALL roles,
  * especially supervisor — so Supervisor(n+1) can score Supervisor(n).
+ * No role or execution plane is excluded from evaluation.
  * See wiki/architecture/evolution-chain.md: evaluableSessions vs mainlineLifecycleSessions.
  */
 export function collectEvaluableSessionIdsByTeam(
@@ -127,8 +128,7 @@ export function collectEvaluableSessionIdsByTeam(
     const meta = session.ahaSessionMetadataFromLocalWebhook;
     const sessionTeamId = meta?.teamId || meta?.roomId;
     if (!sessionTeamId || !session.ahaSessionId) continue;
-    // Exclude bypass execution plane
-    if (meta?.executionPlane === 'bypass') continue;
+    // No role or plane exclusion — all sessions are evaluable
 
     const teamSessions = sessionsByTeam.get(sessionTeamId) ?? new Set<string>();
     teamSessions.add(session.ahaSessionId);
