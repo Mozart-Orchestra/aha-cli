@@ -93,9 +93,37 @@ export function collectLiveMainlineSessionIdsByTeam(
     const meta = session.ahaSessionMetadataFromLocalWebhook;
     const sessionTeamId = meta?.teamId || meta?.roomId;
     if (!sessionTeamId || !session.ahaSessionId) continue;
-    // Exclude supervisor and help-agent roles
+    // Exclude supervisor and help-agent roles (use collectEvaluableSessionIdsByTeam instead)
     if (meta?.role === 'supervisor' || meta?.role === 'help-agent') continue;
     // Exclude bypass execution plane (double-safety with role check)
+    if (meta?.executionPlane === 'bypass') continue;
+
+    const teamSessions = sessionsByTeam.get(sessionTeamId) ?? new Set<string>();
+    teamSessions.add(session.ahaSessionId);
+    sessionsByTeam.set(sessionTeamId, teamSessions);
+  }
+
+  return sessionsByTeam;
+}
+
+/**
+ * Build a map of teamId → Set<ahaSessionId> for all evaluable sessions,
+ * INCLUDING supervisor and help-agent roles (but excluding bypass plane).
+ *
+ * Self-referential closure: the scoring/evaluation pool must include all roles,
+ * especially supervisor — so Supervisor(n+1) can score Supervisor(n).
+ * See wiki/architecture/evolution-chain.md: evaluableSessions vs mainlineLifecycleSessions.
+ */
+export function collectEvaluableSessionIdsByTeam(
+  pidToTrackedSession: Map<number, TrackedSession>
+): Map<string, Set<string>> {
+  const sessionsByTeam = new Map<string, Set<string>>();
+
+  for (const session of pidToTrackedSession.values()) {
+    const meta = session.ahaSessionMetadataFromLocalWebhook;
+    const sessionTeamId = meta?.teamId || meta?.roomId;
+    if (!sessionTeamId || !session.ahaSessionId) continue;
+    // Exclude bypass execution plane
     if (meta?.executionPlane === 'bypass') continue;
 
     const teamSessions = sessionsByTeam.get(sessionTeamId) ?? new Set<string>();
