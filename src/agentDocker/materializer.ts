@@ -15,6 +15,7 @@ import { execFileSync } from 'node:child_process';
 import { basename, join } from 'path';
 
 import { configuration } from '@/configuration';
+import { normalizeGenomeHubUrl } from '@/configurationResolver';
 import { projectPath } from '@/projectPath';
 import type { AgentImage } from '@/api/types/genome';
 import { buildHooksSettingsContent, type ClaudeHooksSettingsContent } from '@/claude/utils/hooksSettings';
@@ -372,17 +373,26 @@ function defaultRepoConfigRoot(repoRoot: string): string {
 function buildAgentImageRefInjection(agentImage: AgentImage, specId?: string): NonNullable<AgentImage['contextInjections']>[number] {
     const resolvedSpecId = specId ?? process.env.AHA_SPEC_ID ?? 'unknown';
     const versionLabel = agentImage.version !== undefined ? `v${agentImage.version}` : 'unversioned';
+    const hubUrl = normalizeGenomeHubUrl();
+    const namespace = agentImage.namespace ?? 'unknown';
 
     return {
         trigger: 'on_join',
-        content: `__genome_ref__\nspecId: ${resolvedSpecId}\nversion: ${versionLabel}`,
+        content: [
+            '__self_view__',
+            `specId: ${resolvedSpecId}`,
+            `version: ${versionLabel}`,
+            `specOrigin: genome-hub`,
+            `hubUrl: ${hubUrl}`,
+            `namespace: ${namespace}`,
+        ].join('\n'),
     };
 }
 
 function buildAgentImageSnapshot(agentImage: AgentImage, specId?: string): AgentImage {
     const injected = buildAgentImageRefInjection(agentImage, specId);
     const existing = agentImage.contextInjections ?? [];
-    const withoutAgentImageRef = existing.filter((entry) => !entry.content.includes('__genome_ref__'));
+    const withoutAgentImageRef = existing.filter((entry) => !entry.content.includes('__genome_ref__') && !entry.content.includes('__self_view__'));
 
     return {
         ...agentImage,

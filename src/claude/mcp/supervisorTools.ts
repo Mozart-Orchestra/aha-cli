@@ -1053,6 +1053,20 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
 
             // ── WHO AM I ──────────────────────────────────────────────────
             const genomeSpec = genomeSpecRef?.current;
+
+            // specOrigin: how this agent's spec was sourced
+            // 'genome-hub' = loaded from hub, 'inline' = no specId, 'orphan' = specId but hub fetch failed, 'unknown' = edge case
+            let specOrigin: 'genome-hub' | 'inline' | 'orphan' | 'unknown';
+            if (!specId && !genomeSpec) {
+                specOrigin = 'inline';
+            } else if (genomeSpec) {
+                specOrigin = 'genome-hub';
+            } else if (specId && !genomeSpec) {
+                specOrigin = 'orphan';
+            } else {
+                specOrigin = 'unknown';
+            }
+
             const projectedIdentity = projectSelfMirrorIdentity({
                 sessionId,
                 role,
@@ -1102,6 +1116,9 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
                             genomeName: identity.genomeName,
                             specId: identity.specId ?? null,
                             candidateId: identity.candidateId ?? null,
+                            specOrigin,
+                            hubUrl: specOrigin === 'genome-hub' ? normalizeGenomeHubUrl() : null,
+                            namespace: genomeSpec?.namespace ?? null,
                         },
                         binding: {
                             sessionId: identity.sessionId,
@@ -1170,6 +1187,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
                     '',
                     `[Identity] ${overview.identity.design.role} / ${overview.identity.design.genomeName}`,
                     `  Spec ID: ${overview.identity.design.specId ?? 'unknown'}`,
+                    `  Origin: ${overview.identity.design.specOrigin}`,
                     `  Session: ${overview.identity.binding.sessionId}`,
                     '',
                     `[Runtime]`,
@@ -1402,6 +1420,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
                 `  Role: ${identity.role}`,
                 `  Genome: ${identity.genomeName}`,
                 `  Description: ${identity.genomeDescription}`,
+                `  Origin: ${specOrigin}`,
                 identity.candidateId ? `  Candidate: ${identity.candidateId}` : '',
                 identity.specId ? `  Spec ID: ${identity.specId}` : '',
                 identity.memberId ? `  Member ID: ${identity.memberId}` : '',
@@ -3938,7 +3957,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
     // ========== Runtime-Aware Supervisor Log Tools ==========
 
     mcp.registerTool('list_team_runtime_logs', {
-        description: 'List runtime log files for team agents across Claude and Codex. Returns ahaSessionId, claudeLocalSessionId, and the exact readSessionId/cursorKey to use with read_runtime_log. For Claude, readSessionId is the claudeLocalSessionId (NOT the Aha sessionId). Available to supervisor/help-agent/org-manager/master.',
+        description: 'List runtime log files for team agents across Claude and Codex. Merges live daemon sessions with persisted run envelopes so historical teams still resolve after daemon restarts. Returns ahaSessionId, claudeLocalSessionId/codexTranscriptPath, and the exact readSessionId/cursorKey to use with read_runtime_log. For Claude, readSessionId is the claudeLocalSessionId (NOT the Aha sessionId). Available to supervisor/help-agent/org-manager/master.',
         title: 'List Team Runtime Logs',
         inputSchema: {
             teamId: z.string().describe('Team ID to list runtime logs for'),
@@ -3968,14 +3987,59 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
                 sessions: Array<{
                     ahaSessionId: string;
                     claudeLocalSessionId?: string;
+                    codexTranscriptPath?: string;
                     runtimeType?: string;
                     role?: string;
                     pid: number;
                 }>;
             };
 
+            const sessionsById = new Map<string, {
+                ahaSessionId: string;
+                claudeLocalSessionId?: string;
+                codexTranscriptPath?: string;
+                runtimeType?: string;
+                role?: string;
+                pid: number | null;
+            }>();
+            for (const session of result.sessions) {
+                sessionsById.set(session.ahaSessionId, session);
+            }
+
+            try {
+                const fs = await import('node:fs');
+                const path = await import('node:path');
+                const runsDir = path.join(resolveAhaHomeDir(), 'runs');
+                if (fs.existsSync(runsDir)) {
+                    for (const fileName of fs.readdirSync(runsDir)) {
+                        if (!fileName.endsWith('.json')) continue;
+                        const filePath = path.join(runsDir, fileName);
+                        let envelope: RunEnvelope | null = null;
+                        try {
+                            envelope = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as RunEnvelope;
+                        } catch {
+                            continue;
+                        }
+                        const persistedSessionId = envelope.sessionId ?? envelope.runId;
+                        if (!persistedSessionId || envelope.teamId !== args.teamId || sessionsById.has(persistedSessionId)) {
+                            continue;
+                        }
+                        sessionsById.set(persistedSessionId, {
+                            ahaSessionId: persistedSessionId,
+                            claudeLocalSessionId: envelope.claudeLocalSessionId ?? undefined,
+                            codexTranscriptPath: envelope.codexTranscriptPath ?? undefined,
+                            runtimeType: envelope.runtimeType ?? undefined,
+                            role: envelope.role ?? undefined,
+                            pid: envelope.pid ?? null,
+                        });
+                    }
+                }
+            } catch (error) {
+                logger.debug(`[list_team_runtime_logs] Failed to merge persisted run envelopes: ${error instanceof Error ? error.message : String(error)}`);
+            }
+
             const homeDir = process.env.HOME || '/tmp';
-            const enriched = resolveTeamRuntimeLogs(result.sessions, homeDir);
+            const enriched = resolveTeamRuntimeLogs([...sessionsById.values()], homeDir);
 
             return {
                 content: [{ type: 'text', text: JSON.stringify(enriched, null, 2) }],
@@ -3987,11 +4051,12 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
     });
 
     mcp.registerTool('read_runtime_log', {
-        description: 'Read runtime-aware supervisor evidence logs with cursor support. Supports Claude session logs, Codex history, and Codex session transcripts. For Claude, sessionId must be the claudeLocalSessionId returned by list_team_runtime_logs (never the Aha sessionId). Supervisor/help-agent only.',
+        description: 'Read runtime-aware supervisor evidence logs with cursor support. Supports Claude session logs, Codex history, and Codex session transcripts. For Claude, sessionId must be the claudeLocalSessionId returned by list_team_runtime_logs. For Codex session logs, pass logFilePath when list_team_runtime_logs provides one. Supervisor/help-agent only.',
         title: 'Read Runtime Log',
         inputSchema: {
             runtimeType: z.enum(['claude', 'codex', 'open-code']).describe('Runtime to read logs for'),
             sessionId: optionalSessionIdSchema.describe('Claude: claudeLocalSessionId from list_team_runtime_logs. Codex session logs: transcript session id / aha session id. Required for session logs.'),
+            logFilePath: z.string().optional().describe('Optional exact JSONL path from list_team_runtime_logs. Use for Codex session logs when readSessionId is an Aha session id.'),
             logKind: z.enum(['session', 'history']).default('session').describe('Log kind. Use "history" for ~/.codex/history.jsonl.'),
             limit: z.coerce.number().default(100).describe('Max log entries to return'),
             fromCursor: z.coerce.number().default(-1).describe('Cursor to read from. Byte offset for session logs, line cursor for codex history. -1 = use supervisor env cursor.'),
@@ -4006,6 +4071,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
                 homeDir: process.env.HOME || '/tmp',
                 runtimeType: args.runtimeType,
                 sessionId: args.sessionId,
+                logFilePath: args.logFilePath,
                 logKind: args.logKind,
                 fromCursor: args.fromCursor,
                 limit: args.limit,
