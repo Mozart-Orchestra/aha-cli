@@ -158,9 +158,76 @@ describe('getContextStatusReport', () => {
             } as any,
         });
 
-        expect(report.contextLimitK).toBe(1000);
-        expect(report.usedPercent).toBe(13);
-        expect(report.status).toContain('LOW');
+        expect(report.contextLimitK).toBe(200);
+        expect(report.usedPercent).toBe(65);
+        expect(report.status).toContain('MODERATE');
+    });
+
+    it('caps usedPercent at 100 when rounding would exceed it (Codex edge case)', () => {
+        const homeDir = mkdtempSync(join(tmpdir(), 'aha-context-codex-cap-'));
+        const sessionDir = join(homeDir, '.codex', 'sessions', '2026', '04', '25');
+        mkdirSync(sessionDir, { recursive: true });
+
+        const filePath = join(sessionDir, 'rollout-2026-04-25T00-00-00-aha-overflow.jsonl');
+        // Simulate: context window = 199,900 tokens, usage = 200,500 tokens
+        // roundK(199,900) = 200K, roundK(200,500) = 201K → 101% without cap
+        writeFileSync(filePath, [
+            JSON.stringify({
+                timestamp: '2026-04-25T00:00:00.000Z',
+                type: 'event_msg',
+                payload: {
+                    type: 'token_count',
+                    info: {
+                        last_token_usage: { input_tokens: 199_600, cached_input_tokens: 900 },
+                        model_context_window: 199_900,
+                    },
+                },
+            }),
+        ].join('\n'), 'utf-8');
+
+        const report = getContextStatusReport({
+            homeDir,
+            ahaSessionId: 'aha-overflow',
+            metadata: { flavor: 'codex' } as any,
+        });
+
+        expect(report.runtimeType).toBe('codex');
+        expect(report.usedPercent).toBe(100);
+        expect(report.status).toContain('SELF-MANAGED');
+    });
+
+    it('caps usedPercent at 100 when Claude rounding would exceed it', () => {
+        const homeDir = mkdtempSync(join(tmpdir(), 'aha-context-claude-cap-'));
+        const projectsDir = join(homeDir, '.claude', 'projects', 'repo');
+        mkdirSync(projectsDir, { recursive: true });
+
+        const filePath = join(projectsDir, 'claude-overflow.jsonl');
+        // Simulate: context window = 200K, usage rounds to >200K
+        writeFileSync(filePath, [
+            JSON.stringify({
+                type: 'assistant',
+                message: {
+                    usage: {
+                        input_tokens: 199_600,
+                        output_tokens: 1000,
+                        cache_creation_input_tokens: 900,
+                        cache_read_input_tokens: 0,
+                    },
+                },
+            }),
+        ].join('\n'), 'utf-8');
+
+        const report = getContextStatusReport({
+            homeDir,
+            ahaSessionId: 'aha-claude-overflow',
+            metadata: {
+                claudeSessionId: 'claude-overflow',
+                flavor: 'claude',
+                contextWindowTokens: 200_000,
+            } as any,
+        });
+
+        expect(report.usedPercent).toBe(100);
     });
 
     it('returns an unavailable report instead of throwing when a target Claude log is missing', () => {

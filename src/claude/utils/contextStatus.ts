@@ -142,9 +142,10 @@ function buildClaudeContextStatus(filePath: string, contextLimitTokens?: number)
         (lastUsage.cache_creation_input_tokens || 0) +
         (lastUsage.cache_read_input_tokens || 0);
     const contextLimitK = roundK(contextLimitTokens ?? DEFAULT_CLAUDE_CONTEXT_WINDOW_TOKENS);
-    const usedPercent = contextLimitK
+    const rawPercent = contextLimitK
         ? Math.round((roundK(currentContextTokens) / contextLimitK) * 100)
         : null;
+    const usedPercent = rawPercent !== null ? Math.min(rawPercent, 100) : null;
     const { status, recommendation } = classifyStatus(usedPercent);
 
     return {
@@ -199,9 +200,10 @@ function buildCodexContextStatus(filePath: string): ContextStatusReport {
         ? lastInfo.model_context_window
         : null;
     const contextLimitK = contextLimitTokens === null ? null : roundK(contextLimitTokens);
-    const usedPercent = contextLimitK
+    const rawPercent = contextLimitK
         ? Math.round((roundK(currentContextTokens) / contextLimitK) * 100)
         : null;
+    const usedPercent = rawPercent !== null ? Math.min(rawPercent, 100) : null;
     const { status, recommendation } = classifyStatus(usedPercent, 'codex');
 
     return {
