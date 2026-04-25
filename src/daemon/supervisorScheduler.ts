@@ -28,6 +28,7 @@ import { stopSession } from './sessionManager';
 import { SpawnSessionOptions, SpawnSessionResult } from '@/modules/common/registerCommonHandlers';
 import {
   deleteSupervisorState,
+  getEffectiveFailoverConfig,
   getPendingActionRetryDelayMs,
   listSupervisorStates,
   readSupervisorState,
@@ -37,6 +38,12 @@ import {
   updateSupervisorState,
 } from './supervisorState';
 import { type AgentHeartbeat } from '@/claude/team/heartbeat';
+import {
+  type AckCheckResult,
+  runAckTimeoutCheck,
+  appendTakeoverAudit,
+  pruneStaleWatches,
+} from './mentionAckTracker';
 
 interface TeamOutstandingWorkSummary {
   teamId: string;
@@ -764,6 +771,85 @@ export async function runSupervisorCycle(ctx: SupervisorContext): Promise<void> 
       `[SUPERVISOR SCHEDULER] pendingAction retry ${nextRetryCount}/${SUPERVISOR_PENDING_ACTION_MAX_RETRIES} ` +
       `failed for team ${supervisorState.teamId}: ${unresolvedSaturatedReuse ? 'help-agent reuse remained saturated' : result.error || 'unknown error'}`
     );
+  }
+
+  // ── Ack timeout check (PDCA-01: coordinator failover detection) ────────────
+  for (const supervisorState of supervisorStatesForWorkScan) {
+    const watches = supervisorState.pendingAckWatches;
+    if (!watches || watches.length === 0) continue;
+
+    // Prune stale watches (older than 1 hour)
+    const prunedWatches = pruneStaleWatches(watches, now);
+    if (prunedWatches.length !== watches.length) {
+      await updateSupervisorRun(supervisorState.teamId, { pendingAckWatches: prunedWatches });
+    }
+
+    const config = getEffectiveFailoverConfig(supervisorState);
+    const results = runAckTimeoutCheck(prunedWatches, config, now);
+
+    for (const result of results) {
+      if (result.action === 'none') continue;
+
+      const isDryRun = config.mode === 'dry-run';
+
+      if (result.action === 'compact') {
+        logger.debug(
+          `[SUPERVISOR SCHEDULER] Ack timeout: session ${result.watch.targetSessionId} ` +
+          `(${result.watch.targetRole}) silent for ${Math.round((now - result.watch.lastMentionAt) / 60000)}min ` +
+          `— recommending compact_agent ${isDryRun ? '(dry-run)' : ''}`
+        );
+        appendTakeoverAudit(supervisorState.teamId, {
+          timestamp: now,
+          triggerRole: 'supervisor',
+          triggerSessionId: supervisorState.lastSessionId ?? 'unknown',
+          targetSessionId: result.watch.targetSessionId,
+          reason: 'silent',
+          action: 'compact',
+          dryRun: isDryRun,
+        });
+        // Note: actual compact_agent call is done by the supervisor agent itself
+        // via its genome prompt. The daemon only produces the recommendation.
+        continue;
+      }
+
+      if (result.action === 'notify-backup') {
+        const consecutiveCount = config.consecutiveTakeovers[result.watch.targetRole] ?? 0;
+        const shouldEscalate = consecutiveCount >= 2;
+
+        logger.debug(
+          `[SUPERVISOR SCHEDULER] Ack timeout: session ${result.watch.targetSessionId} ` +
+          `(${result.watch.targetRole}) confirmed silent — notifying backup ${result.backupRole} ` +
+          `${isDryRun ? '(dry-run)' : ''}${shouldEscalate ? ' [ESCALATE: consecutive limit reached]' : ''}`
+        );
+
+        appendTakeoverAudit(supervisorState.teamId, {
+          timestamp: now,
+          triggerRole: 'supervisor',
+          triggerSessionId: supervisorState.lastSessionId ?? 'unknown',
+          targetSessionId: result.watch.targetSessionId,
+          reason: shouldEscalate ? 'consecutive-limit' : 'silent',
+          action: shouldEscalate ? 'escalate-user' : 'notify-backup',
+          dryRun: isDryRun,
+        });
+
+        // Update consecutive takeover count (immutable update)
+        const currentCount = config.consecutiveTakeovers[result.watch.targetRole] ?? 0;
+        const updatedConfig = {
+          ...config,
+          consecutiveTakeovers: {
+            ...config.consecutiveTakeovers,
+            [result.watch.targetRole]: currentCount + 1,
+          },
+        };
+        await updateSupervisorRun(supervisorState.teamId, {
+          coordinatorFailover: updatedConfig,
+          // Remove the watch after notification
+          pendingAckWatches: prunedWatches.filter(
+            w => w.targetSessionId !== result.watch.targetSessionId
+          ),
+        });
+      }
+    }
   }
 
   // ── Supervisor spawn check (every N heartbeats) ─────────────────────────────

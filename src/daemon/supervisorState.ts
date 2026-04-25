@@ -15,6 +15,7 @@ import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, readdir
 import { join, dirname } from 'path';
 import { configuration } from '@/configuration';
 import { logger } from '@/ui/logger';
+import { type AckWatch, type CoordinatorFailoverConfig, getDefaultFailoverConfig } from './mentionAckTracker';
 
 // ── Self-reflexivity types (v2) ────────────────────────────────────────────
 
@@ -148,6 +149,10 @@ export interface SupervisorState {
     predictions?: SupervisorPrediction[];
     /** Cumulative calibration statistics (v2) */
     calibration?: SupervisorCalibration;
+    /** Pending ack watches for coordinator failover detection (PDCA-01) */
+    pendingAckWatches?: AckWatch[];
+    /** Failover configuration for coordinator silent detection (PDCA-01) */
+    coordinatorFailover?: CoordinatorFailoverConfig;
 }
 
 function getStatePath(teamId: string): string {
@@ -223,6 +228,11 @@ const V2_DEFAULTS: Pick<SupervisorState, 'lastSupervisorPid' | 'pendingAction' |
     calibration: undefined,
 };
 
+const PDCA01_DEFAULTS: Pick<SupervisorState, 'pendingAckWatches' | 'coordinatorFailover'> = {
+    pendingAckWatches: undefined,
+    coordinatorFailover: undefined,
+};
+
 function defaultState(teamId: string): SupervisorState {
     return {
         teamId,
@@ -237,6 +247,7 @@ function defaultState(teamId: string): SupervisorState {
         terminatedAt: 0,
         idleRuns: 0,
         ...V2_DEFAULTS,
+        ...PDCA01_DEFAULTS,
     };
 }
 
@@ -291,7 +302,7 @@ export function markTeamTerminated(teamId: string): void {
 
 export function updateSupervisorRun(
     teamId: string,
-    patch: Partial<Pick<SupervisorState, 'teamLogCursor' | 'ccLogCursors' | 'codexHistoryCursor' | 'codexSessionCursors' | 'lastConclusion' | 'lastFindings' | 'lastRecommendations' | 'lastSessionId' | 'idleRuns' | 'lastSupervisorPid' | 'pendingAction' | 'pendingActionMeta' | 'predictions' | 'calibration'>>
+    patch: Partial<Pick<SupervisorState, 'teamLogCursor' | 'ccLogCursors' | 'codexHistoryCursor' | 'codexSessionCursors' | 'lastConclusion' | 'lastFindings' | 'lastRecommendations' | 'lastSessionId' | 'idleRuns' | 'lastSupervisorPid' | 'pendingAction' | 'pendingActionMeta' | 'predictions' | 'calibration' | 'pendingAckWatches' | 'coordinatorFailover'>>
 ): Promise<SupervisorState> {
     return updateSupervisorState(teamId, (state) => ({
         ...state,
@@ -412,4 +423,14 @@ export function updateCalibration(
         scoreBiasTrend,
         updatedAt: Date.now(),
     };
+}
+
+// ── Failover config helper (PDCA-01) ──────────────────────────────────────────
+
+/**
+ * Resolve the effective failover config from supervisor state.
+ * Returns defaults if not configured (backward compatible).
+ */
+export function getEffectiveFailoverConfig(state: SupervisorState): CoordinatorFailoverConfig {
+    return state.coordinatorFailover ?? getDefaultFailoverConfig();
 }
