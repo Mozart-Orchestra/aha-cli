@@ -253,7 +253,8 @@ async function hasServerSideSupervisorForTeam(teamId: string, credentialsToken: 
 
     const members: any[] = res.data?.team?.members ?? [];
     const activeSupervisors = members.filter(
-      (m) => (m.role === 'supervisor' || m.roleId === 'supervisor') && m.runStatus === 'active',
+      (m) => (m.role === 'supervisor' || m.roleId === 'supervisor') &&
+        (m.lifecycle?.runStatus === 'active' || m.runStatus === 'active'),
     );
     if (activeSupervisors.length > 0) {
       logger.debug(
@@ -1058,6 +1059,7 @@ export async function runSupervisorCycle(ctx: SupervisorContext): Promise<void> 
               displayName: 'Supervisor',
               executionPlane: 'bypass',
               runtimeType: 'claude',
+              lifecycle: { runStatus: 'active' },
               ...(supervisorSpecId ? { candidateId: `spec:${supervisorSpecId}`, specId: supervisorSpecId } : {}),
             },
             {
