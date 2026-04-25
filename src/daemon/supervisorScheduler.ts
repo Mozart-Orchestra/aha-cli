@@ -1024,6 +1024,14 @@ export async function runSupervisorCycle(ctx: SupervisorContext): Promise<void> 
         },
       });
 
+      // Resolve the session ID from the spawn result for registration
+      const resolvedSessionId =
+        supervisorResult.type === 'success' || supervisorResult.type === 'queued'
+          ? supervisorResult.sessionId
+          : supervisorResult.type === 'pending'
+            ? supervisorResult.pendingSessionId
+            : null;
+
       if (supervisorResult.type === 'success' || supervisorResult.type === 'queued') {
         logger.debug(
           `[SUPERVISOR SCHEDULER] Supervisor agent accepted: ${supervisorResult.sessionId}` +
@@ -1033,6 +1041,46 @@ export async function runSupervisorCycle(ctx: SupervisorContext): Promise<void> 
         logger.debug(
           `[SUPERVISOR SCHEDULER] Supervisor process started and is awaiting webhook binding: ${supervisorResult.pendingSessionId} (pid=${supervisorResult.pid})`
         );
+      }
+
+      // Guard 3 fix: proactively register the supervisor in the server-side roster
+      // immediately after spawn, so hasServerSideSupervisorForTeam returns true
+      // on the next scheduler tick. Without this, the spawned supervisor takes
+      // several seconds to boot and call ensureCurrentSessionRegisteredToTeam —
+      // during that window Guard 3 sees no supervisor and spawns duplicates.
+      if (resolvedSessionId) {
+        try {
+          await axios.post(
+            `${configuration.serverUrl}/v1/teams/${teamId}/members`,
+            {
+              sessionId: resolvedSessionId,
+              roleId: 'supervisor',
+              displayName: 'Supervisor',
+              executionPlane: 'bypass',
+              runtimeType: 'claude',
+              ...(supervisorSpecId ? { candidateId: `spec:${supervisorSpecId}`, specId: supervisorSpecId } : {}),
+            },
+            {
+              headers: {
+                Authorization: `Bearer ${credentialsToken}`,
+                'Content-Type': 'application/json',
+              },
+              timeout: 5000,
+            },
+          );
+          logger.debug(
+            `[SUPERVISOR SCHEDULER] Proactively registered supervisor ${resolvedSessionId} ` +
+            `in server roster for team ${teamId} (Guard 3 window closed)`
+          );
+        } catch (regError) {
+          // Registration failure is non-fatal — the supervisor will self-register
+          // when it boots. This is just a proactive optimization to close the window.
+          logger.debug(
+            `[SUPERVISOR SCHEDULER] Proactive roster registration failed for team ${teamId}: ` +
+            `${regError instanceof Error ? regError.message : String(regError)} — ` +
+            `supervisor will self-register on boot`
+          );
+        }
       }
     } catch (e) {
       logger.debug(`[SUPERVISOR SCHEDULER] Failed to spawn supervisor: ${e}`);
