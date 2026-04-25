@@ -79,10 +79,11 @@ export interface SupervisorContext {
 // ── Shared helper ──────────────────────────────────────────────────────────────
 
 /**
- * Build a map of teamId → Set<ahaSessionId> for all live mainline sessions
- * (excludes supervisor and help-agent roles).
+ * Build a map of teamId → Set<ahaSessionId> for all live mainline sessions.
  *
- * This helper is used by both supervisorScheduler and the heartbeat cycle in run.ts.
+ * Self-referential closure: all roles (including supervisor and help-agent) are
+ * included so the system can observe and score itself.  Supervisor(n+1) scoring
+ * Supervisor(n) is objective because the instances differ.
  */
 export function collectLiveMainlineSessionIdsByTeam(
   pidToTrackedSession: Map<number, TrackedSession>
@@ -93,9 +94,7 @@ export function collectLiveMainlineSessionIdsByTeam(
     const meta = session.ahaSessionMetadataFromLocalWebhook;
     const sessionTeamId = meta?.teamId || meta?.roomId;
     if (!sessionTeamId || !session.ahaSessionId) continue;
-    // Exclude supervisor and help-agent roles (use collectEvaluableSessionIdsByTeam instead)
-    if (meta?.role === 'supervisor' || meta?.role === 'help-agent') continue;
-    // Exclude bypass execution plane (double-safety with role check)
+    // Exclude bypass execution plane only — all roles are visible to the system.
     if (meta?.executionPlane === 'bypass') continue;
 
     const teamSessions = sessionsByTeam.get(sessionTeamId) ?? new Set<string>();
@@ -243,6 +242,8 @@ export function resolveTeamWorkingDirectory(
       const sessionTeamId = meta?.teamId || meta?.roomId;
       if (sessionTeamId !== teamId) return false;
       if (!session.ahaSessionId) return false;
+      // Exclude supervisor/help-agent for path resolution only — their cwd is
+      // typically ahaHomeDir, not the project root the supervisor needs.
       if (meta?.role === 'supervisor' || meta?.role === 'help-agent') return false;
       if (meta?.executionPlane === 'bypass') return false;
 
