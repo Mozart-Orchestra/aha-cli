@@ -3199,6 +3199,36 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
             },
         };
 
+        // ── systemPrompt length cap (P1 security: align with evolve_genome) ──
+        const MUTATE_MAX_SYSTEM_PROMPT_LENGTH = 32_000;
+        const mutatedPromptLength = String(mutatedSpec.systemPrompt ?? '').length
+            + String(mutatedSpec.systemPromptSuffix ?? '').length;
+        if (mutatedPromptLength > MUTATE_MAX_SYSTEM_PROMPT_LENGTH) {
+            return {
+                content: [{ type: 'text', text: `Cannot mutate: resulting systemPrompt + systemPromptSuffix would be ${mutatedPromptLength} chars, exceeding the ${MUTATE_MAX_SYSTEM_PROMPT_LENGTH} char safety cap.` }],
+                isError: true,
+            };
+        }
+
+        // ── Boundary injection detection (P1 security: detect genome_identity/safety_rule manipulation) ──
+        const MUTATE_BOUNDARY_PATTERNS: readonly RegExp[] = [
+            /<\/genome_identity>/i,
+            /<genome_identity[\s>]/i,
+            /<\/genome_safety_rule>/i,
+            /<genome_safety_rule[\s>]/i,
+        ];
+        const mutatedPromptContent = String(mutatedSpec.systemPrompt ?? '')
+            + String(mutatedSpec.systemPromptSuffix ?? '');
+        for (const pattern of MUTATE_BOUNDARY_PATTERNS) {
+            const match = mutatedPromptContent.match(pattern);
+            if (match) {
+                return {
+                    content: [{ type: 'text', text: `Cannot mutate: systemPrompt/systemPromptSuffix contains boundary marker injection pattern "${match[0]}". Genome boundary markers (<genome_identity>, <genome_safety_rule>) are managed by the runtime and must not appear in spec content.` }],
+                    isError: true,
+                };
+            }
+        }
+
         if (args.dryRun) {
             const mutationSummary = args.mutations.map(m =>
                 `  ${m.action} ${m.field}${m.index !== undefined ? `[${m.index}]` : ''}: ${m.reason}`
