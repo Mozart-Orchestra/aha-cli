@@ -230,6 +230,49 @@ export function findTrackedSupervisorSessionForPid(
 }
 
 /**
+ * Check if the server-side team roster reports any active supervisor member.
+ *
+ * This is the external truth source that survives daemon restarts.
+ * Used as a third guard after local pidToTrackedSession and persisted PID checks
+ * both fail (which happens every time the daemon is rebuilt/restarted).
+ *
+ * Returns true if any member with role=supervisor has runStatus=active.
+ * Returns false (safe to spawn) if the API call fails — we don't block spawning on network errors.
+ */
+async function hasServerSideSupervisorForTeam(teamId: string, credentialsToken: string): Promise<boolean> {
+  try {
+    const res = await axios.get(
+      `${configuration.serverUrl}/v1/teams/${teamId}`,
+      {
+        headers: { Authorization: `Bearer ${credentialsToken}` },
+        timeout: 5000,
+        validateStatus: (status: number) => status === 200 || status === 404,
+      },
+    );
+    if (res.status === 404) return false;
+
+    const members: any[] = res.data?.team?.members ?? [];
+    const activeSupervisors = members.filter(
+      (m) => (m.role === 'supervisor' || m.roleId === 'supervisor') && m.runStatus === 'active',
+    );
+    if (activeSupervisors.length > 0) {
+      logger.debug(
+        `[SUPERVISOR SCHEDULER] Server reports ${activeSupervisors.length} active supervisor(s) ` +
+        `for team ${teamId} (sessionIds: ${activeSupervisors.map((m) => m.sessionId).join(', ')}) — skipping spawn`,
+      );
+      return true;
+    }
+    return false;
+  } catch (error) {
+    // Network failure must NOT block spawning — only in-memory corruption does that.
+    logger.debug(
+      `[SUPERVISOR SCHEDULER] Server-side supervisor check failed for team ${teamId}: ${error instanceof Error ? error.message : String(error)} — proceeding with local guards only`,
+    );
+    return false;
+  }
+}
+
+/**
  * Resolve the best working directory for bypass agents on a team.
  *
  * We prefer the project path reported by a live mainline team member so
@@ -852,6 +895,14 @@ export async function runSupervisorCycle(ctx: SupervisorContext): Promise<void> 
           `for team ${teamId}, will spawn new one`
         );
       }
+    }
+
+    // Guard 3: Server-side truth source — survives daemon restarts.
+    // After daemon restart, both pidToTrackedSession (in-memory) and lastSupervisorPid
+    // (persisted but stale) are empty/wrong. The server roster is the only reliable source.
+    if (await hasServerSideSupervisorForTeam(teamId, credentialsToken)) {
+      logger.debug(`[SUPERVISOR SCHEDULER] Server-side guard: active supervisor exists for team ${teamId}, skipping spawn`);
+      continue;
     }
 
     // Auto-retire after too many idle runs
