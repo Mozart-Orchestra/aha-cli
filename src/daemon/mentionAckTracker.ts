@@ -249,12 +249,24 @@ export function markCompactAttempted(
 
 /**
  * Remove a watch (e.g. after the target session responded). Returns a new array.
+ * Also returns an updated consecutiveTakeovers map with the target role's counter reset to 0,
+ * since the role has recovered.
  */
 export function removeWatch(
     watches: readonly AckWatch[],
     sessionId: string,
-): AckWatch[] {
-    return watches.filter(w => w.targetSessionId !== sessionId);
+    consecutiveTakeovers?: Readonly<Record<string, number>>,
+): { watches: AckWatch[]; consecutiveTakeovers: Record<string, number> } {
+    const removed = watches.find(w => w.targetSessionId === sessionId);
+    const updatedWatches = watches.filter(w => w.targetSessionId !== sessionId);
+
+    // Reset consecutive counter for the recovered role
+    const updatedCounters: Record<string, number> = { ...(consecutiveTakeovers ?? {}) };
+    if (removed && updatedCounters[removed.targetRole] !== undefined) {
+        updatedCounters[removed.targetRole] = 0;
+    }
+
+    return { watches: updatedWatches, consecutiveTakeovers: updatedCounters };
 }
 
 /**

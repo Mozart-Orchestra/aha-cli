@@ -43,6 +43,7 @@ import {
   runAckTimeoutCheck,
   appendTakeoverAudit,
   pruneStaleWatches,
+  removeWatch,
 } from './mentionAckTracker';
 
 interface TeamOutstandingWorkSummary {
@@ -841,12 +842,18 @@ export async function runSupervisorCycle(ctx: SupervisorContext): Promise<void> 
             [result.watch.targetRole]: currentCount + 1,
           },
         };
+        // Remove watch and keep counter state in sync
+        const removal = removeWatch(
+          prunedWatches,
+          result.watch.targetSessionId,
+          updatedConfig.consecutiveTakeovers,
+        );
         await updateSupervisorRun(supervisorState.teamId, {
-          coordinatorFailover: updatedConfig,
-          // Remove the watch after notification
-          pendingAckWatches: prunedWatches.filter(
-            w => w.targetSessionId !== result.watch.targetSessionId
-          ),
+          coordinatorFailover: {
+            ...updatedConfig,
+            consecutiveTakeovers: removal.consecutiveTakeovers,
+          },
+          pendingAckWatches: removal.watches,
         });
       }
     }
