@@ -1874,9 +1874,11 @@ export function registerTaskTools(ctx: McpToolContext): void {
             const result = await api.releaseSessionTaskLocks(teamId, args.sessionId);
             const count = result.unlockedTaskIds?.length ?? 0;
 
-            // Also clear executionLinks from unlocked tasks for the dead session
+            // Also clear executionLinks from tasks for the dead session
             let cleanedCount = 0;
-            if (count > 0 && Array.isArray(result.unlockedTaskIds)) {
+
+            // Phase 1: clean executionLinks from tasks that had active locks released
+            if (Array.isArray(result.unlockedTaskIds) && result.unlockedTaskIds.length > 0) {
                 for (const taskId of result.unlockedTaskIds) {
                     try {
                         const task = await api.getTask(teamId, taskId);
@@ -1888,8 +1890,30 @@ export function registerTaskTools(ctx: McpToolContext): void {
                             cleanedCount++;
                         }
                     } catch {
-                        // best-effort: log release failure but don't block the response
+                        // best-effort: don't block the response
                     }
+                }
+            }
+
+            // Phase 2: no locks released — scan board for orphaned executionLinks
+            if (cleanedCount === 0) {
+                try {
+                    const taskManager = getTaskStateManager();
+                    if (taskManager) {
+                        const board = await taskManager.getBoard();
+                        const candidates = (board?.tasks ?? []) as Array<{ id: string; executionLinks?: unknown[] }>;
+                        for (const task of candidates) {
+                            if (!Array.isArray(task.executionLinks) || task.executionLinks.length === 0) continue;
+                            const cleaned = (task.executionLinks as Array<Record<string, unknown>>)
+                                .filter((link) => link.sessionId !== args.sessionId || link.status !== 'active');
+                            if (cleaned.length < task.executionLinks.length) {
+                                await api.updateTask(teamId, task.id, { executionLinks: cleaned });
+                                cleanedCount++;
+                            }
+                        }
+                    }
+                } catch {
+                    // best-effort: board scan failure is non-critical
                 }
             }
 
@@ -1898,7 +1922,7 @@ export function registerTaskTools(ctx: McpToolContext): void {
                     type: 'text',
                     text: count > 0
                         ? `Released ${count} task lock(s) for session ${args.sessionId}. Unlocked tasks: ${result.unlockedTaskIds.join(', ')}${cleanedCount > 0 ? `. Cleaned executionLinks on ${cleanedCount} task(s).` : ''}`
-                        : `No active task locks found for session ${args.sessionId}.`,
+                        : `No active task locks found for session ${args.sessionId}.${cleanedCount > 0 ? ` Cleaned orphaned executionLinks on ${cleanedCount} task(s).` : ''}`,
                 }],
                 isError: false,
             };
