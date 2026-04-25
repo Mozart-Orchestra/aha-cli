@@ -912,6 +912,42 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
         }
     });
 
+    // ─── get_system_mirror ─────────────────────────────────────────────────────
+    mcp.registerTool('get_system_mirror', {
+        description: [
+            'Read the latest deploy-log entry to see what version of aha-cli is currently deployed.',
+            'Returns build hash, CLI version, deploy timestamp, and recent deploy history.',
+            'Used by classifyRootCause() to detect stale deployments.',
+            'Available to ALL team members.',
+        ].join(' '),
+        title: 'Get System Mirror',
+        inputSchema: {
+            history: z.number().min(1).max(20).optional().describe('Number of recent deploys to return (default 1, max 20)'),
+        },
+    }, async (args) => {
+        try {
+            const { readFileSync: readF } = await import('node:fs');
+            const { join: joinP } = await import('node:path');
+            const logPath = joinP(configuration.ahaHomeDir, 'deploy-log.jsonl');
+            const count = args.history ?? 1;
+            const content = readF(logPath, 'utf-8').trim();
+            if (!content) {
+                return { content: [{ type: 'text', text: 'No deploy-log found. Deploy-log.jsonl is empty or does not exist yet.' }], isError: true };
+            }
+            const lines = content.split('\n').filter(Boolean);
+            const recent = lines.slice(-count).map(l => JSON.parse(l));
+            const latest = recent[recent.length - 1];
+            const summary = `Current deploy: build=${latest.buildHash} version=${latest.cliVersion} deployed=${latest.time}`;
+            const historyStr = recent.map(r => `  ${r.time} build=${r.buildHash} v${r.cliVersion}`).join('\n');
+            return {
+                content: [{ type: 'text', text: `${summary}\n\nDeploy history (${count}):\n${historyStr}` }],
+                isError: false,
+            };
+        } catch (error) {
+            return { content: [{ type: 'text', text: `No deploy-log available: ${String(error)}` }], isError: true };
+        }
+    });
+
     // ─── get_pool_status ─────────────────────────────────────────────────────
     // Returns a snapshot of all daemon-tracked sessions with role, teamId, PID liveness,
     // and aggregate pool counts per role. Useful for QA/reviewers to verify pool state
@@ -2238,13 +2274,21 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
         const triggerLevel = determineTriggerLevel(overall, dimensions);
         if (triggerLevel === 'L2_alert') {
             try {
+                // Compute team average score from local score storage.
+                // Uses same readScores() already imported — zero new API calls.
+                const { scores: rcScores } = readScores();
+                const teamScores = rcScores.filter(
+                    (s) => s.teamId === args.teamId && s.sessionId !== args.sessionId && typeof s.overall === 'number',
+                );
                 const systemState: SystemStateForClassification = {
                     deployCommit: process.env.AHA_DEPLOY_COMMIT ?? undefined,
                     agentBuildCommit: process.env.AHA_BUILD_COMMIT ?? undefined,
-                    prismaProviderCorrect: undefined, // filled by deploy-manifest in future
-                    visibleToolCount: undefined, // filled by self-view in future
+                    prismaProviderCorrect: undefined,
+                    visibleToolCount: undefined,
                     expectedToolCount: undefined,
-                    teamAvgScore: undefined, // filled by team pulse in future
+                    teamAvgScore: teamScores.length > 0
+                        ? teamScores.reduce((sum, s) => sum + (s.overall as number), 0) / teamScores.length
+                        : undefined,
                 };
                 const rootCause = classifyRootCause(overall, dimensions, systemState);
                 rootCauseSummary = '\n\n' + formatRootCauseSummary(rootCause);
@@ -2418,7 +2462,9 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
                     fromDisplayName: client.getMetadata()?.displayName ?? 'Supervisor',
                     mentions: [args.sessionId],
                 });
-            } catch { /* notification must never break scoring */ }
+            } catch (eventErr) {
+                logger.debug('[score_agent] EVENT notification failed:', eventErr);
+            }
         }
 
         return {
@@ -2775,6 +2821,35 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
             return {
                 content: [{ type: 'text', text: 'No new changes to apply — all learnings already exist and changes[] was empty.' }],
                 isError: false,
+            };
+        }
+
+        // ── Strategy field validation (P1 security: align with mutate_genome field restrictions) ──
+        const evolveConservativeFields = new Set(['memory', 'systemPromptSuffix']);
+        const evolveModerateFields = new Set([
+            ...evolveConservativeFields, 'protocol', 'responsibilities', 'evalCriteria',
+            'handoffProtocol', 'capabilities', 'allowedTools', 'disallowedTools',
+        ]);
+        const effectiveStrategy = args.strategy ?? 'conservative';
+        const strategyFieldErrors: string[] = [];
+        for (const change of diffChanges) {
+            if (change.type === 'narrative') continue;
+            const topField = (change as { path: string }).path.split('.')[0];
+            if (effectiveStrategy === 'conservative' && !evolveConservativeFields.has(topField)) {
+                strategyFieldErrors.push(
+                    `conservative strategy cannot modify '${topField}' via path '${(change as { path: string }).path}' (allowed: ${[...evolveConservativeFields].join(', ')})`
+                );
+            }
+            if (effectiveStrategy === 'moderate' && !evolveModerateFields.has(topField)) {
+                strategyFieldErrors.push(
+                    `moderate strategy cannot modify '${topField}' via path '${(change as { path: string }).path}' (allowed: ${[...evolveModerateFields].join(', ')})`
+                );
+            }
+        }
+        if (strategyFieldErrors.length > 0) {
+            return {
+                content: [{ type: 'text', text: `Strategy validation failed:\n${strategyFieldErrors.join('\n')}` }],
+                isError: true,
             };
         }
 

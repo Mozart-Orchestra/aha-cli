@@ -45,8 +45,8 @@ import { startCaffeinate, stopCaffeinate } from '@/utils/caffeinate';
 import axios from 'axios';
 import { getEnvironmentInfo } from '@/ui/doctor';
 import { writeDaemonState, DaemonLocallyPersistedState, acquireDaemonLock, releaseDaemonLock, readSettings } from '@/persistence';
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync } from 'fs';
+import { join, dirname } from 'path';
 import { spawn, type SpawnOptions } from 'child_process';
 import { projectPath } from '@/projectPath';
 import { withWindowsHide } from '@/utils/windowsProcessOptions';
@@ -88,6 +88,34 @@ export const initialMachineMetadata: MachineMetadata = {
   ahaHomeDir: configuration.ahaHomeDir,
   ahaLibDir: projectPath()
 };
+
+/**
+ * Append a deploy record to deploy-log.jsonl for Dynamic Mirror Layer.
+ * Minimal JSONL: one line per daemon restart, consumed by get_system_mirror MCP tool.
+ */
+function appendDeployLog(state: DaemonLocallyPersistedState, version: string): void {
+  try {
+    const logPath = join(configuration.ahaHomeDir, 'deploy-log.jsonl');
+    const dir = dirname(logPath);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    const record = JSON.stringify({
+      time: new Date().toISOString(),
+      pid: state.pid,
+      buildHash: state.startedWithBuildHash,
+      cliVersion: version,
+      entrypoint: state.runtimeEntrypoint,
+      httpPort: state.httpPort,
+    });
+    appendFileSync(logPath, record + '\n', 'utf-8');
+    // Trim to last 100 entries
+    const lines = readFileSync(logPath, 'utf-8').trim().split('\n');
+    if (lines.length > 100) {
+      writeFileSync(logPath, lines.slice(-100).join('\n') + '\n', 'utf-8');
+    }
+  } catch (err) {
+    logger.debug(`[DEPLOY-LOG] Failed to append: ${err}`);
+  }
+}
 
 /**
  * Ensure genome-hub is reachable and the publish key is configured.
@@ -602,6 +630,7 @@ export async function startDaemon(): Promise<void> {
     };
     currentFileState = fileState;
     writeDaemonState(fileState);
+    appendDeployLog(fileState, diskVersion);
     logger.debug(`[DAEMON RUN] Daemon state written (version: ${diskVersion})`);
 
     // Prepare initial daemon state
