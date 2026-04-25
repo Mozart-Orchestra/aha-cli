@@ -2848,6 +2848,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
             ...evolveConservativeFields, 'protocol', 'responsibilities', 'evalCriteria',
             'handoffProtocol', 'capabilities', 'allowedTools', 'disallowedTools',
         ]);
+        // radical: no field restrictions — full rewrite allowed
         const effectiveStrategy = args.strategy ?? 'conservative';
         const strategyFieldErrors: string[] = [];
         for (const change of diffChanges) {
