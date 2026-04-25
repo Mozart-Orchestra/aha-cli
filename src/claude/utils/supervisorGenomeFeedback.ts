@@ -81,6 +81,19 @@ export function resolveFeedbackUploadTarget(args: {
             source: 'explicit-target',
         };
     }
+
+    // Fallback: resolve canonical genome target by role when spec identity
+    // is unavailable (e.g. genome-hub unreachable or specId not resolved).
+    // This prevents the feedback upload from being silently skipped.
+    const canonical = getCanonicalGenomeTargetForRole(args.role);
+    if (canonical) {
+        return {
+            namespace: canonical.namespace,
+            name: canonical.name,
+            source: 'explicit-target',
+        };
+    }
+
     return null;
 }
 
