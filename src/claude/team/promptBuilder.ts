@@ -65,6 +65,7 @@ export interface KanbanTaskSummary {
     commentCount?: number;
     lastCommentPreview?: string;
     lastCommentBy?: string;
+    summary?: string;
     hasPlanComment?: boolean;
     latestPlanPreview?: string;
     latestPlanBy?: string;

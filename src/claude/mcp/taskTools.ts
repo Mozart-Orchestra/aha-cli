@@ -620,6 +620,29 @@ async function releaseReleasableOverlapExecutionLocksForAssignee(args: {
     return releases;
 }
 
+function extractSummaryText(task: { comments?: unknown[]; description?: string }): string {
+    let source = '';
+    if (Array.isArray(task.comments) && task.comments.length > 0) {
+        const last = task.comments[task.comments.length - 1];
+        if (last && typeof last === 'object') {
+            const content = (last as Record<string, unknown>).content;
+            if (typeof content === 'string') source = content;
+        }
+    }
+    if (!source && typeof task.description === 'string') {
+        source = task.description;
+    }
+    const cleaned = source
+        .replace(/#{1,6}\s/g, '')
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!cleaned) return '';
+    return cleaned.length > 50 ? cleaned.slice(0, 47) + '...' : cleaned;
+}
+
 export function summarizeTaskForList(task: ListableTask): Record<string, unknown> {
     const activeExecutionLocks = Array.isArray(task.executionLinks)
         ? task.executionLinks.flatMap((link): Array<Record<string, string>> => {
@@ -657,6 +680,7 @@ export function summarizeTaskForList(task: ListableTask): Record<string, unknown
         descriptionExcerpt: typeof task.description === 'string' && task.description.length > 0
             ? task.description.slice(0, 80)
             : '(no description)',
+        summary: extractSummaryText(task) || '(no summary)',
     };
 }
 

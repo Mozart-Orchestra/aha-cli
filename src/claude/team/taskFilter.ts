@@ -137,6 +137,20 @@ function toTaskSummary(task: KanbanTask): KanbanTaskSummary {
                 || 'Unknown')
             : undefined;
 
+    const summarySource = task.comments?.length
+        ? task.comments[task.comments.length - 1].content
+        : task.description || '';
+    const summaryCleaned = summarySource
+        .replace(/#{1,6}\s/g, '')
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const summary = summaryCleaned.length > 50
+        ? summaryCleaned.slice(0, 47) + '...'
+        : summaryCleaned;
+
     return {
         id: task.id,
         title: task.title,
@@ -168,6 +182,7 @@ function toTaskSummary(task: KanbanTask): KanbanTaskSummary {
                 || (task.comments[task.comments.length - 1] as any).authorSessionId
                 || (task.comments[task.comments.length - 1] as any).sessionId)
             : undefined,
+        summary,
         hasPlanComment: Boolean(latestPlanComment),
         latestPlanPreview: latestPlanComment?.content.slice(0, 500),
         latestPlanBy: formatCommentAuthor(latestPlanComment),
