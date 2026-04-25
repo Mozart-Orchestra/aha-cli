@@ -31,7 +31,7 @@ export type RootCauseCategory =
 export interface ScoreDimensions {
   delivery: number;
   integrity: number;
-  efficiency: number;
+  efficiency: number | null;
   collaboration: number;
   reliability: number;
 }

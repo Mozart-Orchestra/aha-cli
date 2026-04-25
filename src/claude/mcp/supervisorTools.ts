@@ -145,16 +145,17 @@ export function buildVerdictContent(args: {
     dimensions: {
         delivery: number;
         integrity: number;
-        efficiency: number;
+        efficiency: number | null;
         collaboration: number;
         reliability: number;
     };
     recommendations?: string[];
 }): string {
+    const eff = args.dimensions.efficiency !== null ? args.dimensions.efficiency : 'n/a';
     return [
         `Role: ${args.role}, Session: ${args.sessionId}`,
         `Overall: ${args.overall}/100, Action: ${args.action}`,
-        `Dimensions: delivery=${args.dimensions.delivery} integrity=${args.dimensions.integrity} efficiency=${args.dimensions.efficiency} collaboration=${args.dimensions.collaboration} reliability=${args.dimensions.reliability}`,
+        `Dimensions: delivery=${args.dimensions.delivery} integrity=${args.dimensions.integrity} efficiency=${eff} collaboration=${args.dimensions.collaboration} reliability=${args.dimensions.reliability}`,
         args.recommendations?.length ? `Recommendations: ${args.recommendations.join('; ')}` : '',
     ].filter(Boolean).join('\n');
 }
@@ -1216,7 +1217,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
                             avgScore?: number;
                             evaluationCount?: number;
                             latestAction?: string;
-                            dimensions?: Record<string, number>;
+                            dimensions?: Record<string, number | null>;
                             suggestions?: string[];
                             recentBehaviorPatterns?: string[];
                         };
@@ -2052,7 +2053,7 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
         const { computeDimensionsFromMetrics, computeHardMetricsScore, validateScoreGap } = await import('@/claude/utils/feedbackPrivacy');
         const { computeSessionScoreFromDimensions, computeSessionScoreOverall } = await import('@/claude/utils/sessionScoring');
 
-        let dimensions: { delivery: number; integrity: number; efficiency: number; collaboration: number; reliability: number };
+        let dimensions: { delivery: number; integrity: number; efficiency: number | null; collaboration: number; reliability: number };
         let hardMetricsScore: number | undefined;
         let scoringMode: 'business_metrics' | 'hard_metrics' | 'manual';
 
@@ -2076,8 +2077,10 @@ export async function registerSupervisorTools(ctx: McpToolContext): Promise<void
             : computeSessionScoreFromDimensions(dimensions);
 
         // Compute overall: use provided override or default to the 3-axis session score
+        const fallbackDims = [dimensions.delivery, dimensions.integrity, dimensions.collaboration, dimensions.reliability];
+        if (dimensions.efficiency !== null) fallbackDims.push(dimensions.efficiency);
         const baseOverall = sessionScore.overall ?? hardMetricsScore ?? Math.round(
-            (dimensions.delivery + dimensions.integrity + dimensions.efficiency + dimensions.collaboration + dimensions.reliability) / 5,
+            fallbackDims.reduce((a, b) => a + b, 0) / fallbackDims.length,
         );
         const overall = args.overall !== undefined ? args.overall : baseOverall;
 

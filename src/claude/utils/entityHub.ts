@@ -160,7 +160,7 @@ export async function createEntityVerdict(args: {
     content: string;
     score?: number;
     action?: 'keep' | 'keep_with_guardrails' | 'mutate' | 'discard';
-    dimensions?: Record<string, number>;
+    dimensions?: Record<string, number | null>;
     contextNarrative?: string;
 }): Promise<{ verdict: { id: string } }> {
     const response = await axios.post(

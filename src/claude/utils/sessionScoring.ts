@@ -13,7 +13,7 @@ function clampScore(value: number): number {
 export function computeSessionScoreFromDimensions(dimensions: {
     delivery: number;
     integrity: number;
-    efficiency: number;
+    efficiency: number | null;
     collaboration: number;
     reliability: number;
 }): SessionScore {

@@ -45,7 +45,7 @@ import { computeSessionScoreFromDimensions } from './sessionScoring';
 export function computeDimensionsFromHardMetrics(m: HardMetrics): {
     delivery: number;
     integrity: number;
-    efficiency: number;
+    efficiency: number | null;
     collaboration: number;
     reliability: number;
 } {
@@ -66,7 +66,7 @@ export function computeDimensionsFromHardMetrics(m: HardMetrics): {
         : null;
     const efficiency = tokensPerTask !== null
         ? Math.min(100, Math.max(10, Math.round(5_000_000 / tokensPerTask)))
-        : 60;
+        : null;
 
     // collaboration: ratio of protocol-correct messages (task-updates + notifications)
     // 50 % protocol messages → 100 score (so we multiply by 2, cap at 100)
@@ -104,7 +104,7 @@ export function computeDimensionsFromMetrics(
 ): {
     delivery: number;
     integrity: number;
-    efficiency: number;
+    efficiency: number | null;
     collaboration: number;
     reliability: number;
 } {
@@ -127,7 +127,7 @@ export function computeDimensionsFromMetrics(
         : null;
     const efficiency = tokensPerTask !== null
         ? Math.min(100, Math.max(10, Math.round(5_000_000 / tokensPerTask)))
-        : 60;
+        : null;
 
     // collaboration: board protocol compliance
     const collaboration = Math.min(100, Math.max(0, Math.round(business.boardComplianceRate * 100)));
@@ -151,9 +151,10 @@ export function computeHardMetricsScore(
     business?: BusinessMetrics,
 ): number {
     const dims = computeDimensionsFromMetrics(raw, business);
-    return Math.round(
-        (dims.delivery + dims.integrity + dims.efficiency + dims.collaboration + dims.reliability) / 5,
-    );
+    const allDims = [dims.delivery, dims.integrity, dims.collaboration, dims.reliability];
+    if (dims.efficiency !== null) allDims.push(dims.efficiency);
+    const sum = allDims.reduce((a, b) => a + b, 0);
+    return Math.round(sum / allDims.length);
 }
 
 /**
@@ -221,7 +222,7 @@ export interface AggregatedFeedback {
     dimensions: {
         delivery: number;
         integrity: number;
-        efficiency: number;
+        efficiency: number | null;
         collaboration: number;
         reliability: number;
     };
@@ -238,17 +239,18 @@ export interface AggregatedFeedback {
 export function aggregateScores(scores: AgentScore[]): AggregatedFeedback | null {
     if (scores.length === 0) return null;
 
-    // Compute averages
+    // Compute averages (efficiency may be null — track separately)
     const count = scores.length;
     const sumDims = scores.reduce(
         (acc, s) => ({
             delivery: acc.delivery + s.dimensions.delivery,
             integrity: acc.integrity + s.dimensions.integrity,
-            efficiency: acc.efficiency + s.dimensions.efficiency,
+            efficiency: acc.efficiency + (s.dimensions.efficiency ?? 0),
+            efficiencyCount: acc.efficiencyCount + (s.dimensions.efficiency !== null ? 1 : 0),
             collaboration: acc.collaboration + s.dimensions.collaboration,
             reliability: acc.reliability + s.dimensions.reliability,
         }),
-        { delivery: 0, integrity: 0, efficiency: 0, collaboration: 0, reliability: 0 }
+        { delivery: 0, integrity: 0, efficiency: 0, efficiencyCount: 0, collaboration: 0, reliability: 0 }
     );
     const sumSession = scores.reduce(
         (acc, s) => {
@@ -266,7 +268,9 @@ export function aggregateScores(scores: AgentScore[]): AggregatedFeedback | null
     const avgDims = {
         delivery: Math.round(sumDims.delivery / count),
         integrity: Math.round(sumDims.integrity / count),
-        efficiency: Math.round(sumDims.efficiency / count),
+        efficiency: sumDims.efficiencyCount > 0
+            ? Math.round(sumDims.efficiency / sumDims.efficiencyCount)
+            : null,
         collaboration: Math.round(sumDims.collaboration / count),
         reliability: Math.round(sumDims.reliability / count),
     };

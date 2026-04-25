@@ -118,7 +118,7 @@ export interface AgentScore {
     dimensions: {
         delivery: number;      // 0-100
         integrity: number;     // 0-100
-        efficiency: number;    // 0-100
+        efficiency: number | null;    // 0-100, null when no token data available
         collaboration: number; // 0-100
         reliability: number;   // 0-100
     };

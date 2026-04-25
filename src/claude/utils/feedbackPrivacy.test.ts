@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aggregateScores } from './feedbackPrivacy';
+import { aggregateScores, computeDimensionsFromHardMetrics, computeHardMetricsScore } from './feedbackPrivacy';
 import type { AgentScore } from './scoreStorage';
 
 function makeScore(partial: Partial<AgentScore>): AgentScore {
@@ -67,5 +67,80 @@ describe('aggregateScores', () => {
             overall: 81,
         });
         expect(aggregated?.latestAction).toBe('keep_with_guardrails');
+    });
+
+    it('skips null efficiency in aggregated dimension average', () => {
+        const aggregated = aggregateScores([
+            makeScore({
+                sessionId: 's1',
+                overall: 80,
+                dimensions: { delivery: 80, integrity: 80, efficiency: null, collaboration: 80, reliability: 80 },
+            }),
+            makeScore({
+                sessionId: 's2',
+                overall: 80,
+                dimensions: { delivery: 80, integrity: 80, efficiency: 60, collaboration: 80, reliability: 80 },
+            }),
+        ]);
+
+        expect(aggregated).not.toBeNull();
+        // s1 efficiency is null (skipped), s2 efficiency is 60 → avg efficiency = 60
+        expect(aggregated?.dimensions.efficiency).toBe(60);
+        // delivery avg = (80+80)/2 = 80 (unaffected)
+        expect(aggregated?.dimensions.delivery).toBe(80);
+    });
+});
+
+describe('computeDimensionsFromHardMetrics', () => {
+    it('returns null efficiency when no tasks completed', () => {
+        const dims = computeDimensionsFromHardMetrics({
+            tasksAssigned: 0,
+            tasksCompleted: 0,
+            tasksBlocked: 0,
+            tokensUsed: 0,
+            messagesSent: 0,
+            protocolMessages: 0,
+            toolCallCount: 0,
+            toolErrorCount: 0,
+            sessionDurationMinutes: 0,
+        });
+
+        expect(dims.efficiency).toBeNull();
+    });
+
+    it('returns null efficiency when tokensUsed is zero', () => {
+        const dims = computeDimensionsFromHardMetrics({
+            tasksAssigned: 1,
+            tasksCompleted: 1,
+            tasksBlocked: 0,
+            tokensUsed: 0,
+            messagesSent: 0,
+            protocolMessages: 0,
+            toolCallCount: 0,
+            toolErrorCount: 0,
+            sessionDurationMinutes: 5,
+        });
+
+        expect(dims.efficiency).toBeNull();
+    });
+});
+
+describe('computeHardMetricsScore', () => {
+    it('averages 4 dimensions when efficiency is null', () => {
+        const score = computeHardMetricsScore({
+            tasksAssigned: 0,
+            tasksCompleted: 0,
+            tasksBlocked: 0,
+            tokensUsed: 0,
+            messagesSent: 10,
+            protocolMessages: 5,
+            toolCallCount: 10,
+            toolErrorCount: 1,
+            sessionDurationMinutes: 10,
+        });
+
+        // delivery=50, integrity=75, efficiency=null(skipped), collaboration=100, reliability=90
+        // avg = (50+75+100+90)/4 = 78.75 → 79
+        expect(score).toBe(79);
     });
 });

@@ -151,7 +151,7 @@ async function createEntityVerdictViaServerProxy(args: {
     content: string;
     score?: number;
     action?: VerdictAction;
-    dimensions?: Record<string, number>;
+    dimensions?: Record<string, number | null>;
     contextNarrative?: string;
 }): Promise<{ verdict: { id: string } }> {
     const response = await args.fetchImpl(
@@ -191,7 +191,7 @@ export async function writeEntityVerdict(args: {
     content: string;
     score?: number;
     action?: VerdictAction;
-    dimensions?: Record<string, number>;
+    dimensions?: Record<string, number | null>;
     hubPublishKey?: string;
     serverUrl?: string;
     authToken?: string;
