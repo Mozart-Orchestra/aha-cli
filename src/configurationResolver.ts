@@ -132,12 +132,30 @@ export function resolveServerConfig(
   webappUrl: string
   genomeHubUrl: string
 } {
-  const serverUrl = env.AHA_SERVER_URL || persistentConfig.serverUrl || DEFAULT_SERVER_URL
+  // CLI flags have highest priority: --server-url > env > persistent config > default
+  const cliServerUrl = readFlagFromArgv('--server-url') || readFlagFromArgv('--base-url');
+  const cliWebappUrl = readFlagFromArgv('--webapp-url');
+
+  const serverUrl = cliServerUrl || env.AHA_SERVER_URL || persistentConfig.serverUrl || DEFAULT_SERVER_URL
   return {
     serverUrl,
-    webappUrl: env.AHA_WEBAPP_URL || persistentConfig.webappUrl || DEFAULT_WEBAPP_URL,
+    webappUrl: cliWebappUrl || env.AHA_WEBAPP_URL || persistentConfig.webappUrl || DEFAULT_WEBAPP_URL,
     genomeHubUrl: env.GENOME_HUB_URL || deriveGenomeHubUrl(serverUrl),
   }
+}
+
+function readFlagFromArgv(flag: string): string | undefined {
+  const argv = process.argv;
+  for (let i = 0; i < argv.length - 1; i++) {
+    if (argv[i] === flag) {
+      return argv[i + 1];
+    }
+    // Handle --flag=value syntax
+    if (argv[i].startsWith(`${flag}=`)) {
+      return argv[i].substring(flag.length + 1);
+    }
+  }
+  return undefined;
 }
 
 export function readResolvedPersistentCliConfig(
