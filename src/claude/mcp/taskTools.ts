@@ -55,6 +55,7 @@ interface CreateTaskPolicyResult {
 type ListableTask = {
     id: string;
     title?: string;
+    description?: string;
     status?: string;
     priority?: string | null;
     assigneeId?: string | null;
@@ -653,6 +654,9 @@ export function summarizeTaskForList(task: ListableTask): Record<string, unknown
         acceptanceCriteriaCount: Array.isArray(task.acceptanceCriteria) ? task.acceptanceCriteria.length : 0,
         subtaskCount: Array.isArray(task.subtaskIds) ? task.subtaskIds.length : 0,
         ...(activeExecutionLocks.length > 0 ? { activeExecutionLocks } : {}),
+        descriptionExcerpt: typeof task.description === 'string' && task.description.length > 0
+            ? task.description.slice(0, 80)
+            : '(no description)',
     };
 }
 
