@@ -44,6 +44,7 @@ import {
   appendTakeoverAudit,
   pruneStaleWatches,
   removeWatch,
+  MAX_CONSECUTIVE_TAKEOVERS,
 } from './mentionAckTracker';
 
 interface TeamOutstandingWorkSummary {
@@ -815,7 +816,7 @@ export async function runSupervisorCycle(ctx: SupervisorContext): Promise<void> 
 
       if (result.action === 'notify-backup') {
         const consecutiveCount = config.consecutiveTakeovers[result.watch.targetRole] ?? 0;
-        const shouldEscalate = consecutiveCount >= 2;
+        const shouldEscalate = consecutiveCount >= MAX_CONSECUTIVE_TAKEOVERS;
 
         logger.debug(
           `[SUPERVISOR SCHEDULER] Ack timeout: session ${result.watch.targetSessionId} ` +

@@ -84,7 +84,7 @@ const CONFIRMED_SILENT_MS = 10 * 60 * 1000;
 const MIN_MENTION_COUNT = 2;
 
 /** Maximum consecutive takeovers before escalating to user */
-const MAX_CONSECUTIVE_TAKEOVERS = 2;
+export const MAX_CONSECUTIVE_TAKEOVERS = 2;
 
 /** Default fallback map */
 const DEFAULT_FALLBACK_MAP: Readonly<Record<string, string>> = {
