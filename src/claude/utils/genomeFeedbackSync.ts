@@ -185,7 +185,9 @@ function canAutoCreateOfficialTarget(target: FeedbackUploadTarget): boolean {
         return false;
     }
 
-    return ROLE_PLACEHOLDERS.has(target.name);
+    // Allow auto-create for any @official target — the placeholder body
+    // will use DEFAULT_ROLE_PLACEHOLDER for unmapped roles.
+    return true;
 }
 
 function buildPlaceholderGenomeBody(target: FeedbackUploadTarget, role: string): string {
