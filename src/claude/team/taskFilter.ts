@@ -137,9 +137,12 @@ function toTaskSummary(task: KanbanTask): KanbanTaskSummary {
                 || 'Unknown')
             : undefined;
 
-    const summarySource = task.comments?.length
+    const lastCommentContent = task.comments?.length
         ? task.comments[task.comments.length - 1].content
-        : task.description || '';
+        : undefined;
+    const summarySource = typeof lastCommentContent === 'string'
+        ? lastCommentContent
+        : (task.description || '');
     const summaryCleaned = summarySource
         .replace(/#{1,6}\s/g, '')
         .replace(/\*\*([^*]+)\*\*/g, '$1')
